@@ -2,7 +2,7 @@ use crate::domain::ports::VectorStore;
 use crate::domain::entities::DocumentChunk;
 use async_trait::async_trait;
 use anyhow::Result;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use tracing::info;
 
 pub struct PostgresVectorStore {

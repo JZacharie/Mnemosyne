@@ -44,7 +44,7 @@ impl EmbeddingService for LiteLLMEmbeddingService {
     async fn generate_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         debug!("Generating embeddings for {} texts", texts.len());
         
-        let response = self.client.post(&format!("{}/embeddings", self.api_url))
+        let response = self.client.post(format!("{}/embeddings", self.api_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&EmbeddingRequest {
                 model: self.model.clone(),
