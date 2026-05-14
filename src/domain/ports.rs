@@ -1,6 +1,6 @@
-use crate::domain::entities::{DocumentChunk, Document, User, AuditLog};
-use async_trait::async_trait;
+use crate::domain::entities::{AuditLog, Document, DocumentChunk, User};
 use anyhow::Result;
+use async_trait::async_trait;
 use uuid::Uuid;
 
 #[async_trait]

@@ -1,7 +1,7 @@
-use crate::domain::ports::VectorStore;
 use crate::domain::entities::DocumentChunk;
-use async_trait::async_trait;
+use crate::domain::ports::VectorStore;
 use anyhow::Result;
+use async_trait::async_trait;
 use sqlx::PgPool;
 use tracing::info;
 
@@ -18,12 +18,16 @@ impl PostgresVectorStore {
 #[async_trait]
 impl VectorStore for PostgresVectorStore {
     async fn save_chunks(&self, chunks: Vec<DocumentChunk>, collection_name: &str) -> Result<()> {
-        info!("Saving {} chunks to collection {}", chunks.len(), collection_name);
-        
+        info!(
+            "Saving {} chunks to collection {}",
+            chunks.len(),
+            collection_name
+        );
+
         for chunk in chunks {
             let metadata_json = serde_json::to_value(&chunk.metadata)?;
             let embedding = chunk.embedding.unwrap_or_default();
-            
+
             // Note: pgvector specific syntax might need raw sql or specific bind handling
             // Here we use standard sqlx::query
             sqlx::query(

@@ -1,10 +1,10 @@
-use crate::domain::ports::{UserRepository, AuditRepository};
-use crate::domain::entities::{User, AuditLog};
-use std::sync::Arc;
-use anyhow::{Result, anyhow};
-use uuid::Uuid;
+use crate::domain::entities::{AuditLog, User};
+use crate::domain::ports::{AuditRepository, UserRepository};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
+use std::sync::Arc;
 use tracing::info;
+use uuid::Uuid;
 
 pub struct AuthUseCase {
     user_repository: Arc<dyn UserRepository>,
@@ -24,33 +24,41 @@ impl AuthUseCase {
 
     pub async fn login(&self, username: &str, password_attempt: &str) -> Result<User> {
         info!("Login attempt for user: {}", username);
-        
-        let user = self.user_repository.get_by_username(username).await?
+
+        let user = self
+            .user_repository
+            .get_by_username(username)
+            .await?
             .ok_or_else(|| anyhow!("User not found"))?;
 
         // In a real app, verify password hash using bcrypt
         // For now, simple check
-        if password_attempt == "password" { // Placeholder
-             self.audit_repository.log(AuditLog {
-                id: Uuid::new_v4(),
-                user_id: user.id,
-                action: "LOGIN_SUCCESS".to_string(),
-                resource: "auth".to_string(),
-                timestamp: Utc::now(),
-                metadata: None,
-            }).await?;
-            
+        if password_attempt == "password" {
+            // Placeholder
+            self.audit_repository
+                .log(AuditLog {
+                    id: Uuid::new_v4(),
+                    user_id: user.id,
+                    action: "LOGIN_SUCCESS".to_string(),
+                    resource: "auth".to_string(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                })
+                .await?;
+
             Ok(user)
         } else {
-            self.audit_repository.log(AuditLog {
-                id: Uuid::new_v4(),
-                user_id: user.id,
-                action: "LOGIN_FAILURE".to_string(),
-                resource: "auth".to_string(),
-                timestamp: Utc::now(),
-                metadata: None,
-            }).await?;
-            
+            self.audit_repository
+                .log(AuditLog {
+                    id: Uuid::new_v4(),
+                    user_id: user.id,
+                    action: "LOGIN_FAILURE".to_string(),
+                    resource: "auth".to_string(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                })
+                .await?;
+
             Err(anyhow!("Invalid password"))
         }
     }

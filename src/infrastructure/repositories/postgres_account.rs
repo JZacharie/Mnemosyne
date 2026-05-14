@@ -1,7 +1,7 @@
-use crate::domain::ports::{UserRepository, AuditRepository};
-use crate::domain::entities::{User, AuditLog};
-use async_trait::async_trait;
+use crate::domain::entities::{AuditLog, User};
+use crate::domain::ports::{AuditRepository, UserRepository};
 use anyhow::Result;
+use async_trait::async_trait;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -19,12 +19,12 @@ impl PostgresAccountRepository {
 impl UserRepository for PostgresAccountRepository {
     async fn get_by_username(&self, username: &str) -> Result<Option<User>> {
         let row = sqlx::query(
-            "SELECT id, username, password_hash, email, created_at FROM users WHERE username = $1"
+            "SELECT id, username, password_hash, email, created_at FROM users WHERE username = $1",
         )
         .bind(username)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         match row {
             Some(row) => Ok(Some(User {
                 id: row.get("id"),
@@ -49,7 +49,7 @@ impl UserRepository for PostgresAccountRepository {
         .bind(user.created_at)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(user)
     }
 }
@@ -68,7 +68,7 @@ impl AuditRepository for PostgresAccountRepository {
         .bind(entry.metadata)
         .execute(&self.pool)
         .await?;
-        
+
         Ok(())
     }
 
@@ -80,16 +80,19 @@ impl AuditRepository for PostgresAccountRepository {
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
-        
-        let logs = rows.into_iter().map(|row| AuditLog {
-            id: row.get("id"),
-            user_id: row.get("user_id"),
-            action: row.get("action"),
-            resource: row.get("resource"),
-            timestamp: row.get("timestamp"),
-            metadata: row.get("metadata"),
-        }).collect();
-        
+
+        let logs = rows
+            .into_iter()
+            .map(|row| AuditLog {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                action: row.get("action"),
+                resource: row.get("resource"),
+                timestamp: row.get("timestamp"),
+                metadata: row.get("metadata"),
+            })
+            .collect();
+
         Ok(logs)
     }
 }

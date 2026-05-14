@@ -1,8 +1,8 @@
-use crate::domain::ports::{VectorStore, EmbeddingService, FileScanner};
 use crate::domain::entities::DocumentChunk;
-use std::sync::Arc;
+use crate::domain::ports::{EmbeddingService, FileScanner, VectorStore};
 use anyhow::Result;
-use tracing::{info, error, debug};
+use std::sync::Arc;
+use tracing::{debug, error, info};
 
 pub struct IndexingUseCase {
     file_scanner: Arc<dyn FileScanner>,
@@ -25,7 +25,7 @@ impl IndexingUseCase {
 
     pub async fn execute(&self, path: &str, collection_name: &str) -> Result<()> {
         info!("Starting indexing process for path: {}", path);
-        
+
         let file_paths = self.file_scanner.scan_directory(path).await?;
         info!("Found {} files to process", file_paths.len());
 
@@ -42,16 +42,20 @@ impl IndexingUseCase {
     async fn process_file(&self, file_path: &str, collection_name: &str) -> Result<()> {
         debug!("Processing file: {}", file_path);
         let doc = self.file_scanner.load_document(file_path).await?;
-        
+
         // Simple chunking logic (could be moved to a domain service)
-        let chunks_content: Vec<String> = doc.content
+        let chunks_content: Vec<String> = doc
+            .content
             .chars()
             .collect::<Vec<char>>()
             .chunks(1000)
             .map(|c| c.iter().collect())
             .collect();
 
-        let embeddings = self.embedding_service.generate_embeddings(chunks_content.clone()).await?;
+        let embeddings = self
+            .embedding_service
+            .generate_embeddings(chunks_content.clone())
+            .await?;
 
         let doc_chunks: Vec<DocumentChunk> = chunks_content
             .into_iter()
@@ -63,7 +67,9 @@ impl IndexingUseCase {
             })
             .collect();
 
-        self.vector_store.save_chunks(doc_chunks, collection_name).await?;
+        self.vector_store
+            .save_chunks(doc_chunks, collection_name)
+            .await?;
 
         Ok(())
     }

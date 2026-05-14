@@ -1,6 +1,6 @@
 use crate::domain::ports::EmbeddingService;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -43,8 +43,10 @@ struct EmbeddingData {
 impl EmbeddingService for LiteLLMEmbeddingService {
     async fn generate_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         debug!("Generating embeddings for {} texts", texts.len());
-        
-        let response = self.client.post(format!("{}/embeddings", self.api_url))
+
+        let response = self
+            .client
+            .post(format!("{}/embeddings", self.api_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&EmbeddingRequest {
                 model: self.model.clone(),
@@ -59,6 +61,10 @@ impl EmbeddingService for LiteLLMEmbeddingService {
         }
 
         let embedding_res: EmbeddingResponse = response.json().await?;
-        Ok(embedding_res.data.into_iter().map(|d| d.embedding).collect())
+        Ok(embedding_res
+            .data
+            .into_iter()
+            .map(|d| d.embedding)
+            .collect())
     }
 }

@@ -1,10 +1,10 @@
-use crate::domain::ports::FileScanner;
 use crate::domain::entities::{Document, DocumentMetadata};
+use crate::domain::ports::FileScanner;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use anyhow::{Result, anyhow};
-use walkdir::WalkDir;
 use std::fs;
 use std::time::UNIX_EPOCH;
+use walkdir::WalkDir;
 
 pub struct LocalFileScanner {
     pvc_name: String,
@@ -44,15 +44,17 @@ impl FileScanner for LocalFileScanner {
         };
 
         let metadata = fs::metadata(file_path)?;
-        let last_modified = metadata.modified()?
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() as i64;
+        let last_modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         Ok(Document {
             content,
             metadata: DocumentMetadata {
                 source_path: file_path.to_string(),
-                file_name: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                file_name: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
                 pvc_name: self.pvc_name.clone(),
                 file_size: metadata.len(),
                 last_modified,

@@ -1,7 +1,7 @@
-use sqlx::PgPool;
-use uuid::Uuid;
 use chrono::Utc;
 use dotenvy::dotenv;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO users (id, username, password_hash, email, created_at) 
          VALUES ($1, $2, $3, $4, $5) 
-         ON CONFLICT (username) DO NOTHING"
+         ON CONFLICT (username) DO NOTHING",
     )
     .bind(user_id)
     .bind(username)

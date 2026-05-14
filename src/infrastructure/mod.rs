@@ -1,1 +1,2 @@
-pub mod repositories; pub mod embedding;
+pub mod embedding;
+pub mod repositories;
