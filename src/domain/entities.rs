@@ -45,6 +45,7 @@ pub struct AuditLog {
     pub metadata: Option<serde_json::Value>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub user_id: Uuid,

@@ -22,11 +22,13 @@ pub trait FileScanner: Send + Sync {
 #[async_trait]
 pub trait UserRepository: Send + Sync {
     async fn get_by_username(&self, username: &str) -> Result<Option<User>>;
+    #[allow(dead_code)]
     async fn create(&self, user: User) -> Result<User>;
 }
 
 #[async_trait]
 pub trait AuditRepository: Send + Sync {
     async fn log(&self, entry: AuditLog) -> Result<()>;
+    #[allow(dead_code)]
     async fn get_by_user(&self, user_id: Uuid) -> Result<Vec<AuditLog>>;
 }

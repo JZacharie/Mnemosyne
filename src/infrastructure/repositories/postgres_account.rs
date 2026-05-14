@@ -37,6 +37,7 @@ impl UserRepository for PostgresAccountRepository {
         }
     }
 
+    #[allow(dead_code)]
     async fn create(&self, user: User) -> Result<User> {
         sqlx::query(
             "INSERT INTO users (id, username, password_hash, email, created_at) VALUES ($1, $2, $3, $4, $5)"
@@ -71,6 +72,7 @@ impl AuditRepository for PostgresAccountRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn get_by_user(&self, user_id: Uuid) -> Result<Vec<AuditLog>> {
         let rows = sqlx::query(
             "SELECT id, user_id, action, resource, timestamp, metadata FROM audit_logs WHERE user_id = $1 ORDER BY timestamp DESC"
