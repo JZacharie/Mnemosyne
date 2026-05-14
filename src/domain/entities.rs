@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
@@ -20,4 +22,32 @@ pub struct DocumentChunk {
     pub content: String,
     pub metadata: DocumentMetadata,
     pub embedding: Option<Vec<f32>>,
+}
+
+// --- Account Management ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: Uuid,
+    pub username: String,
+    pub password_hash: String,
+    pub email: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLog {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub action: String,
+    pub resource: String,
+    pub timestamp: DateTime<Utc>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub user_id: Uuid,
+    pub token: String,
+    pub expires_at: DateTime<Utc>,
 }

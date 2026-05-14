@@ -1,6 +1,7 @@
-use crate::domain::entities::{DocumentChunk, Document};
+use crate::domain::entities::{DocumentChunk, Document, User, AuditLog};
 use async_trait::async_trait;
 use anyhow::Result;
+use uuid::Uuid;
 
 #[async_trait]
 pub trait VectorStore: Send + Sync {
@@ -16,4 +17,16 @@ pub trait EmbeddingService: Send + Sync {
 pub trait FileScanner: Send + Sync {
     async fn scan_directory(&self, path: &str) -> Result<Vec<String>>;
     async fn load_document(&self, file_path: &str) -> Result<Document>;
+}
+
+#[async_trait]
+pub trait UserRepository: Send + Sync {
+    async fn get_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn create(&self, user: User) -> Result<User>;
+}
+
+#[async_trait]
+pub trait AuditRepository: Send + Sync {
+    async fn log(&self, entry: AuditLog) -> Result<()>;
+    async fn get_by_user(&self, user_id: Uuid) -> Result<Vec<AuditLog>>;
 }

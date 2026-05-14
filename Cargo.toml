@@ -7,9 +7,18 @@ edition = "2021"
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 
+# Web Framework
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "compression-gzip", "trace"] }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Auth
+jsonwebtoken = "9.0"
+bcrypt = "0.15"
 
 # Error handling
 anyhow = "1.0"
@@ -20,8 +29,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "json", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # HTTP Client (for LiteLLM)
 reqwest = { version = "0.12", features = ["json"] }
@@ -33,6 +43,3 @@ clap = { version = "4.0", features = ["derive", "env"] }
 async-trait = "0.1"
 futures = "0.3"
 dotenvy = "0.15"
-
-# Document processing (Rust ecosystem is a bit sparse here, might use custom simple logic or external bins if needed)
-# For now, let's focus on the structure.
