@@ -3,6 +3,10 @@ name = "mnemosyne"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "mnemosyne"
+path = "src/main.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -39,7 +43,9 @@ reqwest = { version = "0.12", features = ["json"] }
 # Utils
 glob = "0.3"
 walkdir = "2.0"
-clap = { version = "4.0", features = ["derive", "env"] }
+clap = { version = "=4.5.16", features = ["derive", "env"] }
+clap_derive = "=4.5.13"
 async-trait = "0.1"
 futures = "0.3"
 dotenvy = "0.15"
+
