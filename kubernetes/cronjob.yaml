@@ -11,7 +11,7 @@ spec:
         spec:
           containers:
           - name: indexer
-            image: ghcr.io/jzcharie/mnemosyne-indexer:latest # Placeholder image
+            image: ghcr.io/jzcharie/mnemosyne:latest # Actual image from CI
             env:
             - name: DATABASE_URL
               valueFrom:
@@ -31,6 +31,8 @@ spec:
               value: "zembed-132k"
             - name: NFS_PATH
               value: "/data/nfs"
+            - name: ONESHOT
+              value: "true"
             volumeMounts:
             - name: nfs-data
               mountPath: /data/nfs

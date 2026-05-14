@@ -26,7 +26,7 @@ use crate::interfaces::http::auth_handlers::login_handler;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, env = "NFS_PATH", default_value = "/data/nfs")]
+    #[arg(long, env = "NFS_PATH", default_value = "/data/nfs", value_delimiter = ',')]
     paths: Vec<String>,
 
     #[arg(long, env = "DATABASE_URL")]
@@ -49,6 +49,9 @@ struct Args {
 
     #[arg(long, env = "HTTP_PORT", default_value = "8080")]
     http_port: u16,
+
+    #[arg(long, env = "ONESHOT", default_value = "false")]
+    oneshot: bool,
 }
 
 #[tokio::main]
@@ -116,6 +119,11 @@ async fn main() -> anyhow::Result<()> {
 
     info!("✨ Initial indexing job complete!");
     
+    if args.oneshot {
+        info!("🛑 Oneshot mode enabled, exiting...");
+        return Ok(());
+    }
+
     // Keep the service running
     server_handle.await?;
 
