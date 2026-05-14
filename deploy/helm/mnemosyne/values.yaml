@@ -29,7 +29,16 @@ securityContext:
     drop:
     - ALL
 
+service:
+  type: ClusterIP
+  port: 8080
+
+deployment:
+  enabled: true
+  replicaCount: 1
+
 cronjob:
+  enabled: false # Disabled by default if running as deployment
   schedule: "0 2 * * *"
   concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 3
@@ -41,8 +50,12 @@ config:
   litellmUrl: "http://litellm.litellm.svc.cluster.local:4000"
   nfsPath: "/data/nfs"
 
-secrets:
-  existingSecret: "mnemosyne-secrets"
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreName: "vault-backend"
+  secretStoreKind: "ClusterSecretStore"
+  vaultPath: "ai/mnemosyne"
 
 persistence:
   pvcs:
