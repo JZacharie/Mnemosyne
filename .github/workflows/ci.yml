@@ -12,21 +12,50 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  lint:
+  security:
+    name: Security Scan (Gitleaks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lint-and-format:
+    name: Lint and Format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - name: Rustfmt Check
-        run: cargo fmt --all -- --check
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Format Code (Auto-fix)
+        run: cargo fmt --all
+
       - name: Clippy Lint
         run: cargo clippy -- -D warnings
 
+      - name: Auto-commit fixes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-format and fix lints"
+          file_pattern: 'src/**/*.rs'
+
   build-and-push:
-    needs: lint
+    needs: [security, lint-and-format]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
