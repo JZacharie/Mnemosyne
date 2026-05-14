@@ -1,0 +1,11 @@
+langchain
+langchain-community
+langchain-text-splitters
+pypdf
+pgvector
+timescale-vector
+litellm
+psycopg2-binary
+rich
+python-dotenv
+pyyaml

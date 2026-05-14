@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mnemosyne-indexer
+  namespace: mnemosyne
+spec:
+  schedule: "0 2 * * *" # Every day at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: indexer
+            image: ghcr.io/jzcharie/mnemosyne-indexer:latest # Placeholder image
+            env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mnemosyne-secrets
+                  key: DATABASE_URL
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mnemosyne-secrets
+                  key: LITELLM_API_KEY
+            - name: LITELLM_URL
+              value: "http://litellm.litellm.svc.cluster.local:4000"
+            - name: COLLECTION_NAME
+              value: "mnemosyne_docs"
+            - name: EMBEDDING_MODEL
+              value: "zembed-132k"
+            - name: NFS_PATH
+              value: "/data/nfs"
+            volumeMounts:
+            - name: nfs-data
+              mountPath: /data/nfs
+              readOnly: true
+          volumes:
+          - name: nfs-data
+            persistentVolumeClaim:
+              claimName: mnemosyne-pvc
+          restartPolicy: OnFailure
