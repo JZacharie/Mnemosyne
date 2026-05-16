@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mnemosyne-check-index
+  namespace: mnemosyne
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: checker
+        image: python:3.11-slim
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          export PYTHONPATH=$PYTHONPATH:/tmp/pip
+          pip install requests --target /tmp/pip --quiet
+          python3 -c '
+          import requests
+          import os
+          from pathlib import Path
+
+          QDRANT_URL = "http://qdrant.qdrant.svc.cluster.local:6333"
+          COLLECTION_NAME = "mnemosyne_docs"
+          NFS_PATH = "/mnt/xpool"
+
+          def get_indexed_files():
+              indexed_files = set()
+              offset = None
+              while True:
+                  payload = {"limit": 100, "with_payload": ["source_path"], "with_vector": False}
+                  if offset: payload["offset"] = offset
+                  try:
+                      response = requests.post(f"{QDRANT_URL}/collections/{COLLECTION_NAME}/points/scroll", json=payload)
+                      response.raise_for_status()
+                      data = response.json()["result"]
+                      for point in data["points"]:
+                          path = point.get("payload", {}).get("source_path")
+                          if path: indexed_files.add(path)
+                      offset = data.get("next_page_offset")
+                      if not offset: break
+                  except Exception as e:
+                      print(f"Error scrolling Qdrant: {e}")
+                      break
+              return indexed_files
+
+          def scan_local_files(base_path):
+              local_files = set()
+              extensions = {".pdf", ".md", ".txt", ".log"}
+              for root, dirs, files in os.walk(base_path):
+                  for file in files:
+                      if Path(file).suffix.lower() in extensions:
+                          local_files.add(os.path.join(root, file))
+              return local_files
+
+          print(f"Connecting to Qdrant...")
+          indexed = get_indexed_files()
+          print(f"Found {len(indexed)} indexed files.")
+          print(f"Scanning {NFS_PATH}...")
+          local = scan_local_files(NFS_PATH)
+          print(f"Found {len(local)} local files.")
+          missing = local - indexed
+          print(f"\n--- NON INDEXED FILES ({len(missing)}) ---")
+          for f in sorted(list(missing)):
+              print(f)
+          '
+        volumeMounts:
+        - name: xpool
+          mountPath: /mnt/xpool
+      volumes:
+      - name: xpool
+        nfs:
+          server: 192.168.0.50
+          path: /xpool/share/share
+          readOnly: true
+      restartPolicy: Never
+  backoffLimit: 1

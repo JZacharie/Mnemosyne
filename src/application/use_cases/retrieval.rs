@@ -36,10 +36,10 @@ impl RetrievalUseCase {
             .next()
             .ok_or_else(|| anyhow::anyhow!("No embedding generated"))?;
 
-        // 2. Search vector store (retrieve top 50 as recommended)
+        // 2. Search vector store (Hybrid Search: Vector + Full-Text)
         let initial_results = self
             .vector_store
-            .search(query_vector, 50, collection_name)
+            .search(query, query_vector, 50, collection_name)
             .await?;
 
         if initial_results.is_empty() {
@@ -70,7 +70,7 @@ mod tests {
         #[async_trait]
         impl VectorStore for VectorStoreImpl {
             async fn save_chunks(&self, chunks: Vec<DocumentChunk>, collection_name: &str) -> Result<()>;
-            async fn search(&self, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>>;
+            async fn search(&self, query_text: &str, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>>;
         }
     }
 
@@ -105,7 +105,7 @@ mod tests {
 
         // Mock search
         mock_vs.expect_search()
-            .returning(|_, _, _| Ok(vec![DocumentChunk {
+            .returning(|_, _, _, _| Ok(vec![DocumentChunk {
                 content: "doc1".to_string(),
                 metadata: DocumentMetadata {
                     source_path: "p1".to_string(),

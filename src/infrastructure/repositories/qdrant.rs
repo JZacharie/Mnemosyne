@@ -3,7 +3,8 @@ use crate::domain::ports::VectorStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    CreateCollectionBuilder, Distance, PointStruct, SearchPoints, UpsertPointsBuilder,
+    Condition, CreateCollectionBuilder, Distance, FieldType, Filter, Fusion, PointStruct,
+    PrefetchQueryBuilder, Query, QueryPointsBuilder, UpsertPointsBuilder,
     Value as QdrantValue, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
@@ -29,7 +30,19 @@ impl QdrantVectorStore {
                     CreateCollectionBuilder::new(collection_name)
                         .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
                         .shard_number(3)
-                        .replication_factor(2),
+                        .replication_factor(2)
+                        .on_disk_payload(true),
+                )
+                .await?;
+
+            // Create full-text payload index for hybrid search
+            self.client
+                .create_field_index(
+                    qdrant_client::qdrant::CreateFieldIndexCollectionBuilder::new(
+                        collection_name,
+                        "content",
+                        FieldType::Text,
+                    ),
                 )
                 .await?;
         }
@@ -93,6 +106,7 @@ impl VectorStore for QdrantVectorStore {
 
     async fn search(
         &self,
+        query_text: &str,
         query_vector: Vec<f32>,
         limit: usize,
         collection_name: &str,
@@ -101,20 +115,19 @@ impl VectorStore for QdrantVectorStore {
         self.ensure_collection(collection_name, vector_size).await?;
 
         debug!(
-            "Searching Qdrant collection {} with limit {}",
+            "Hybrid search on collection {} with limit {}",
             collection_name, limit
         );
 
-        let search_result = self
-            .client
-            .search_points(SearchPoints {
-                collection_name: collection_name.to_string(),
-                vector: query_vector,
-                limit: limit as u64,
-                with_payload: Some(true.into()),
-                ..Default::default()
-            })
-            .await?;
+        // Hybrid Search: Vector Search narrowed by Full-Text filtering
+        let request = QueryPointsBuilder::new(collection_name)
+            .query(query_vector)
+            .filter(Filter::must(vec![Condition::matches_text("content", query_text)]))
+            .limit(limit as u64)
+            .with_payload(true)
+            .build();
+
+        let search_result = self.client.query(request).await?;
 
         let mut chunks = Vec::new();
         for point in search_result.result {

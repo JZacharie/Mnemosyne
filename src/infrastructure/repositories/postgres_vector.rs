@@ -46,6 +46,7 @@ impl VectorStore for PostgresVectorStore {
 
     async fn search(
         &self,
+        _query_text: &str,
         _query_vector: Vec<f32>,
         _limit: usize,
         _collection_name: &str,
