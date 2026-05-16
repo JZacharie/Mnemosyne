@@ -1,0 +1,113 @@
+use crate::domain::entities::{DocumentChunk, DocumentMetadata};
+use crate::domain::ports::VectorStore;
+use anyhow::Result;
+use async_trait::async_trait;
+use qdrant_client::qdrant::{
+    PointStruct, SearchPoints, CreateCollectionBuilder, VectorParamsBuilder, Distance,
+    UpsertPointsBuilder, Value as QdrantValue,
+};
+use qdrant_client::Qdrant;
+use std::collections::HashMap;
+use tracing::{info, debug};
+
+pub struct QdrantVectorStore {
+    client: Qdrant,
+}
+
+impl QdrantVectorStore {
+    pub async fn new(url: &str) -> Result<Self> {
+        let client = Qdrant::from_url(url).build()?;
+        Ok(Self { client })
+    }
+
+    async fn ensure_collection(&self, collection_name: &str, vector_size: u64) -> Result<()> {
+        if !self.client.collection_exists(collection_name).await? {
+            info!("Creating Qdrant collection: {}", collection_name);
+            self.client
+                .create_collection(
+                    CreateCollectionBuilder::new(collection_name)
+                        .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
+                )
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl VectorStore for QdrantVectorStore {
+    async fn save_chunks(&self, chunks: Vec<DocumentChunk>, collection_name: &str) -> Result<()> {
+        if chunks.is_empty() {
+            return Ok(());
+        }
+
+        let vector_size = chunks[0].embedding.as_ref().map(|v| v.len() as u64).unwrap_or(1024);
+        self.ensure_collection(collection_name, vector_size).await?;
+
+        let mut points = Vec::new();
+        for chunk in chunks {
+            if let Some(embedding) = chunk.embedding {
+                let mut payload: HashMap<String, QdrantValue> = HashMap::new();
+                payload.insert("content".to_string(), chunk.content.into());
+                payload.insert("source_path".to_string(), chunk.metadata.source_path.into());
+                payload.insert("file_name".to_string(), chunk.metadata.file_name.into());
+                payload.insert("pvc_name".to_string(), chunk.metadata.pvc_name.into());
+                payload.insert("file_size".to_string(), (chunk.metadata.file_size as i64).into());
+                payload.insert("last_modified".to_string(), chunk.metadata.last_modified.into());
+
+                points.push(PointStruct::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    embedding,
+                    payload,
+                ));
+            }
+        }
+
+        if !points.is_empty() {
+            self.client.upsert_points(UpsertPointsBuilder::new(collection_name, points)).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn search(&self, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>> {
+        debug!("Searching Qdrant collection {} with limit {}", collection_name, limit);
+
+        let search_result = self.client.search_points(
+            SearchPoints {
+                collection_name: collection_name.to_string(),
+                vector: query_vector,
+                limit: limit as u64,
+                with_payload: Some(true.into()),
+                ..Default::default()
+            }
+        ).await?;
+
+        let mut chunks = Vec::new();
+        for point in search_result.result {
+            let payload = point.payload;
+            
+            let content = payload.get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            let metadata = DocumentMetadata {
+                source_path: payload.get("source_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+                file_name: payload.get("file_name").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+                pvc_name: payload.get("pvc_name").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
+                file_size: payload.get("file_size").and_then(|v| v.as_integer()).unwrap_or(0) as u64,
+                last_modified: payload.get("last_modified").and_then(|v| v.as_integer()).unwrap_or(0),
+            };
+
+            chunks.push(DocumentChunk {
+                content,
+                metadata,
+                embedding: None,
+                score: Some(point.score),
+            });
+        }
+
+        Ok(chunks)
+    }
+}

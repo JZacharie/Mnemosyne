@@ -58,6 +58,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "mnemosyne.fullname" . }}-secrets
                   key: NFS_PATH
+            - name: QDRANT_URL
+              value: {{ .Values.qdrant.url | quote }}
+            - name: TEI_EMBEDDER_URL
+              value: {{ .Values.tei.embedder.url | quote }}
+            - name: TEI_RERANKER_URL
+              value: {{ .Values.tei.reranker.url | quote }}
           volumeMounts:
             {{- range .Values.persistence.pvcs }}
             - name: {{ .name }}

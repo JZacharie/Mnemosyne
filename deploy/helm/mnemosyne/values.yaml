@@ -61,6 +61,19 @@ externalSecrets:
   vaultPath: "ai/mnemosyne"
   dbVaultPath: "pg-sbx/grafana"
 
+qdrant:
+  url: "http://qdrant.qdrant.svc.cluster.local:6333"
+
+tei:
+  embedder:
+    enabled: true
+    model: "BAAI/bge-m3"
+    url: "http://mnemosyne-tei-embedder.mnemosyne.svc.cluster.local"
+  reranker:
+    enabled: true
+    model: "BAAI/bge-reranker-large"
+    url: "http://mnemosyne-tei-reranker.mnemosyne.svc.cluster.local"
+
 
 
 persistence:

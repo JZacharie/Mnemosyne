@@ -48,4 +48,5 @@ clap_derive = "=4.5.13"
 async-trait = "0.1"
 futures = "0.3"
 dotenvy = "0.15"
+qdrant-client = "1.18.0"
 

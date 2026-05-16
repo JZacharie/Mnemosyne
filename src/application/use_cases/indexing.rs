@@ -64,6 +64,7 @@ impl IndexingUseCase {
                 content,
                 metadata: doc.metadata.clone(),
                 embedding: Some(embedding),
+                score: None,
             })
             .collect();
 

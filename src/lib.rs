@@ -1,4 +1,26 @@
+use std::sync::Arc;
 pub mod domain;
 pub mod application;
 pub mod infrastructure;
 pub mod interfaces;
+
+use axum::extract::FromRef;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub auth_use_case: Arc<application::use_cases::auth::AuthUseCase>,
+    pub retrieval_use_case: Arc<application::use_cases::retrieval::RetrievalUseCase>,
+    pub collection_name: String,
+}
+
+impl FromRef<AppState> for Arc<application::use_cases::auth::AuthUseCase> {
+    fn from_ref(state: &AppState) -> Self {
+        state.auth_use_case.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<application::use_cases::retrieval::RetrievalUseCase> {
+    fn from_ref(state: &AppState) -> Self {
+        state.retrieval_use_case.clone()
+    }
+}

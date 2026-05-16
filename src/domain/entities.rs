@@ -22,6 +22,7 @@ pub struct DocumentChunk {
     pub content: String,
     pub metadata: DocumentMetadata,
     pub embedding: Option<Vec<f32>>,
+    pub score: Option<f32>,
 }
 
 // --- Account Management ---
