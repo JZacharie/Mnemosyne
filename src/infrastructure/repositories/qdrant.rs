@@ -17,11 +17,7 @@ pub struct QdrantVectorStore {
 impl QdrantVectorStore {
     pub async fn new(url: &str) -> Result<Self> {
         let client = Qdrant::from_url(url)
-            .check_compatibility(false)
             .build()?;
-        // Note: Compatibility check is usually handled by the client during the first request.
-        // In newer versions of the client, we might need a different way to disable it.
-        // For now, we'll rely on downgrading the version in Cargo.toml.
         Ok(Self { client })
     }
 
