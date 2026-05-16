@@ -3,9 +3,8 @@ use crate::domain::ports::VectorStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, Distance, FieldType, Filter, Fusion, PointStruct,
-    PrefetchQueryBuilder, Query, QueryPointsBuilder, UpsertPointsBuilder,
-    Value as QdrantValue, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, Distance, FieldType, Filter, PointStruct,
+    QueryPointsBuilder, UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use std::collections::HashMap;
