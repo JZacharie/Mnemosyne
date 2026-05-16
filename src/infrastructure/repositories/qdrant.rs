@@ -27,7 +27,9 @@ impl QdrantVectorStore {
             self.client
                 .create_collection(
                     CreateCollectionBuilder::new(collection_name)
-                        .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine)),
+                        .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
+                        .shard_number(3)
+                        .replication_factor(2),
                 )
                 .await?;
         }
