@@ -62,9 +62,12 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
 
     // Setup logging
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
     tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(filter)
         .init();
 
     let args = Args::parse();
