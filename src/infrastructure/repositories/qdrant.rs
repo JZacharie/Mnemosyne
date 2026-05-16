@@ -3,12 +3,12 @@ use crate::domain::ports::VectorStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    PointStruct, SearchPoints, CreateCollectionBuilder, VectorParamsBuilder, Distance,
-    UpsertPointsBuilder, Value as QdrantValue,
+    CreateCollectionBuilder, Distance, PointStruct, SearchPoints, UpsertPointsBuilder,
+    Value as QdrantValue, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use std::collections::HashMap;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 pub struct QdrantVectorStore {
     client: Qdrant,
@@ -26,7 +26,7 @@ impl QdrantVectorStore {
             self.client
                 .create_collection(
                     CreateCollectionBuilder::new(collection_name)
-                        .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
+                        .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine)),
                 )
                 .await?;
         }
@@ -41,7 +41,11 @@ impl VectorStore for QdrantVectorStore {
             return Ok(());
         }
 
-        let vector_size = chunks[0].embedding.as_ref().map(|v| v.len() as u64).unwrap_or(1024);
+        let vector_size = chunks[0]
+            .embedding
+            .as_ref()
+            .map(|v| v.len() as u64)
+            .unwrap_or(1024);
         self.ensure_collection(collection_name, vector_size).await?;
 
         let mut points = Vec::new();
@@ -52,8 +56,14 @@ impl VectorStore for QdrantVectorStore {
                 payload.insert("source_path".to_string(), chunk.metadata.source_path.into());
                 payload.insert("file_name".to_string(), chunk.metadata.file_name.into());
                 payload.insert("pvc_name".to_string(), chunk.metadata.pvc_name.into());
-                payload.insert("file_size".to_string(), (chunk.metadata.file_size as i64).into());
-                payload.insert("last_modified".to_string(), chunk.metadata.last_modified.into());
+                payload.insert(
+                    "file_size".to_string(),
+                    (chunk.metadata.file_size as i64).into(),
+                );
+                payload.insert(
+                    "last_modified".to_string(),
+                    chunk.metadata.last_modified.into(),
+                );
 
                 points.push(PointStruct::new(
                     uuid::Uuid::new_v4().to_string(),
@@ -64,40 +74,70 @@ impl VectorStore for QdrantVectorStore {
         }
 
         if !points.is_empty() {
-            self.client.upsert_points(UpsertPointsBuilder::new(collection_name, points)).await?;
+            self.client
+                .upsert_points(UpsertPointsBuilder::new(collection_name, points))
+                .await?;
         }
 
         Ok(())
     }
 
-    async fn search(&self, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>> {
-        debug!("Searching Qdrant collection {} with limit {}", collection_name, limit);
+    async fn search(
+        &self,
+        query_vector: Vec<f32>,
+        limit: usize,
+        collection_name: &str,
+    ) -> Result<Vec<DocumentChunk>> {
+        debug!(
+            "Searching Qdrant collection {} with limit {}",
+            collection_name, limit
+        );
 
-        let search_result = self.client.search_points(
-            SearchPoints {
+        let search_result = self
+            .client
+            .search_points(SearchPoints {
                 collection_name: collection_name.to_string(),
                 vector: query_vector,
                 limit: limit as u64,
                 with_payload: Some(true.into()),
                 ..Default::default()
-            }
-        ).await?;
+            })
+            .await?;
 
         let mut chunks = Vec::new();
         for point in search_result.result {
             let payload = point.payload;
-            
-            let content = payload.get("content")
+
+            let content = payload
+                .get("content")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default();
 
             let metadata = DocumentMetadata {
-                source_path: payload.get("source_path").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-                file_name: payload.get("file_name").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-                pvc_name: payload.get("pvc_name").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default(),
-                file_size: payload.get("file_size").and_then(|v| v.as_integer()).unwrap_or(0) as u64,
-                last_modified: payload.get("last_modified").and_then(|v| v.as_integer()).unwrap_or(0),
+                source_path: payload
+                    .get("source_path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                file_name: payload
+                    .get("file_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                pvc_name: payload
+                    .get("pvc_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                file_size: payload
+                    .get("file_size")
+                    .and_then(|v| v.as_integer())
+                    .unwrap_or(0) as u64,
+                last_modified: payload
+                    .get("last_modified")
+                    .and_then(|v| v.as_integer())
+                    .unwrap_or(0),
             };
 
             chunks.push(DocumentChunk {

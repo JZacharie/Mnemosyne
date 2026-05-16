@@ -69,7 +69,12 @@ impl EmbeddingService for TEIService {
 
 #[async_trait]
 impl RerankingService for TEIService {
-    async fn rerank(&self, query: &str, mut documents: Vec<DocumentChunk>, top_n: usize) -> Result<Vec<DocumentChunk>> {
+    async fn rerank(
+        &self,
+        query: &str,
+        mut documents: Vec<DocumentChunk>,
+        top_n: usize,
+    ) -> Result<Vec<DocumentChunk>> {
         if documents.is_empty() {
             return Ok(documents);
         }
@@ -77,7 +82,7 @@ impl RerankingService for TEIService {
         debug!("TEI: Reranking {} documents for query", documents.len());
 
         let texts: Vec<String> = documents.iter().map(|d| d.content.clone()).collect();
-        
+
         let response = self
             .client
             .post(format!("{}/rerank", self.reranker_url))
@@ -95,7 +100,7 @@ impl RerankingService for TEIService {
         }
 
         let results: Vec<TEIRerankResult> = response.json().await?;
-        
+
         // Update scores and sort
         for res in &results {
             if let Some(doc) = documents.get_mut(res.index) {
@@ -105,7 +110,10 @@ impl RerankingService for TEIService {
 
         // Sort by score descending
         documents.sort_by(|a, b| {
-            b.score.unwrap_or(0.0).partial_cmp(&a.score.unwrap_or(0.0)).unwrap()
+            b.score
+                .unwrap_or(0.0)
+                .partial_cmp(&a.score.unwrap_or(0.0))
+                .unwrap()
         });
 
         // Keep top_n

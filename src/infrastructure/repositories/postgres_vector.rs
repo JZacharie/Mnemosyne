@@ -44,7 +44,12 @@ impl VectorStore for PostgresVectorStore {
         Ok(())
     }
 
-    async fn search(&self, _query_vector: Vec<f32>, _limit: usize, _collection_name: &str) -> Result<Vec<DocumentChunk>> {
+    async fn search(
+        &self,
+        _query_vector: Vec<f32>,
+        _limit: usize,
+        _collection_name: &str,
+    ) -> Result<Vec<DocumentChunk>> {
         // Simple placeholder for now, as we are migrating to Qdrant for performance
         Ok(vec![])
     }
