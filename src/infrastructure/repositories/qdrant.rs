@@ -88,6 +88,9 @@ impl VectorStore for QdrantVectorStore {
         limit: usize,
         collection_name: &str,
     ) -> Result<Vec<DocumentChunk>> {
+        let vector_size = query_vector.len() as u64;
+        self.ensure_collection(collection_name, vector_size).await?;
+
         debug!(
             "Searching Qdrant collection {} with limit {}",
             collection_name, limit
