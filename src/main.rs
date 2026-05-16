@@ -10,6 +10,9 @@ use axum::{
 };
 use std::net::SocketAddr;
 
+use axum::response::IntoResponse;
+use axum::Json;
+use tower_http::cors::{Any, CorsLayer};
 use mnemosyne::infrastructure::repositories::file_scanner::LocalFileScanner;
 use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
 use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRepository;
@@ -117,8 +120,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Build Axum router
     let app = Router::new()
+        .route("/health", axum::routing::get(health_handler))
         .route("/api/auth/login", post(login_handler))
         .route("/api/search", post(search_handler))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(state);
 
     // Start HTTP server in background
@@ -148,4 +158,8 @@ async fn main() -> anyhow::Result<()> {
     server_handle.await?;
 
     Ok(())
+}
+
+async fn health_handler() -> impl IntoResponse {
+    Json(serde_json::json!({ "status": "ok", "service": "mnemosyne" }))
 }
