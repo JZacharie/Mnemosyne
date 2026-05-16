@@ -1,66 +1,86 @@
 # Mnemosyne 🧠
 
-Mnemosyne is a modern, high-performance RAG indexer written in **Rust**. It follows the **12-Factor App** methodology and uses **Hexagonal Architecture** for maximum maintainability and testability.
+Mnemosyne is a high-performance, production-grade **RAG (Retrieval-Augmented Generation) Indexer** and **Search Engine** written in **Rust**. Designed for large-scale data lakes and high-concurrency environments, it provides a state-of-the-art hybrid search experience by combining dense semantic vectors with sparse keyword filtering.
+
+## 🚀 Key Features
+
+-   **Parallel Indexing Engine**: Leverages Rust's `Tokio` and `futures` to process multiple files in parallel (default concurrency: 8), saturating high-performance vector databases.
+-   **Hybrid Search Strategy**: Combines **Semantic Vector Search** (dense) with **Full-Text Filtering** (sparse) using Qdrant's Query API and Reciprocal Rank Fusion (RRF) logic.
+-   **Advanced Reranking**: Integrated with **TEI (Text Embeddings Inference)** for multi-stage retrieval, ensuring the most relevant chunks are always at the top.
+-   **Rich Metadata Extraction**:
+    *   **Data Integrity**: Automatic **SHA256 hashing** for deduplication and change tracking.
+    *   **Contextual Tagging**: Hierarchical folder-based tagging to preserve document structure.
+    *   **Temporal Tracking**: Creation and modification date indexing for time-aware retrieval.
+-   **Production Infrastructure**:
+    *   **Qdrant Native**: Optimized for Qdrant clusters with on-disk payload storage and high-performance collection settings.
+    *   **PDF Intelligence**: Robust extraction using `pdf-extract` with `spawn_blocking` pools to prevent thread starvation.
+    *   **Observability**: Structured JSON logging via `tracing` with silenced noisy libraries for clean Kubernetes logs.
 
 ## 🏗️ Architecture
 
-Mnemosyne is built using **Ports & Adapters** (Hexagonal Architecture):
+Mnemosyne follows the **Hexagonal Architecture** (Ports & Adapters) for maximum modularity:
 
-- **Domain**: Core business logic and entities.
-- **Application**: Use cases orchestration (e.g., `IndexingUseCase`).
-- **Infrastructure**: Technical implementations for:
-  - **Vector Store**: PostgreSQL with `pgvector` and `pgvectorscale`.
-  - **Embedding Service**: LiteLLM / OpenAI API.
-  - **File Scanner**: Local filesystem / PVC scanning.
-
-## 🚀 Features
-
-- **Performance**: Built with Rust and Tokio for high-concurrency indexing.
-- **12-Factor Compliant**: Configuration via environment variables, stateless execution, and structured logging.
-- **PgVectorScale Support**: Optimized for Timescale's vector extension.
-- **Multi-PVC Indexing**: Supports mounting and scanning multiple PVCs.
-- **CI/CD Ready**: Includes GitHub Actions and Helm charts for GitOps/ArgoCD.
+-   **Domain**: Core entities (`Document`, `Chunk`) and ports (traits for `VectorStore`, `EmbeddingService`).
+-   **Application**: Parallelized use cases for indexing, auth, and hybrid retrieval.
+-   **Infrastructure**:
+    *   **Vector Store**: [Qdrant](https://qdrant.tech/) (Primary).
+    *   **Embedding/Rerank**: [HuggingFace TEI](https://github.com/huggingface/text-embeddings-inference).
+    *   **Database**: [PostgreSQL](https://www.postgresql.org/) (Account management & persistent metadata).
+-   **Interfaces**: High-performance REST API built with [Axum](https://github.com/tokio-rs/axum).
 
 ## 🛠️ Configuration
 
+Mnemosyne is configured via environment variables (12-Factor App compliant).
+
 | Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `LITELLM_URL` | LiteLLM API endpoint | `http://litellm:4000` |
-| `LITELLM_API_KEY` | LiteLLM API Key | Required |
-| `NFS_PATH` | Path to scan for documents | `/data/nfs` |
-| `COLLECTION_NAME` | PGVector collection name | `mnemosyne_docs` |
-| `EMBEDDING_MODEL` | Model to use for embeddings | `zembed-132k` |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | PostgreSQL connection string | **Required** |
+| `QDRANT_URL` | Qdrant REST/gRPC endpoint | `http://qdrant.qdrant.svc.cluster.local:6333` |
+| `TEI_EMBEDDER_URL` | TEI Embedding Service endpoint | `http://mnemosyne-tei-embedder` |
+| `TEI_RERANKER_URL` | TEI Reranking Service endpoint | `http://mnemosyne-tei-reranker` |
+| `NFS_PATH` | Path(s) to scan for documents (comma-separated) | `/data/nfs` |
+| `COLLECTION_NAME` | Qdrant collection name | `mnemosyne_docs` |
+| `EMBEDDING_MODEL` | Model ID for tracking/metadata | `BAAI/bge-m3` |
+| `HTTP_PORT` | Port for the API server | `8080` |
+| `ONESHOT` | If `true`, exit after indexing is complete | `false` |
+| `RUST_LOG` | Logging level (`info`, `debug`, `error`) | `info` |
 
 ## 📦 Deployment
 
-### Helm
+### Kubernetes (ArgoCD / Helm)
 
-The Helm chart is located in `deploy/helm/mnemosyne`.
+The modern deployment uses **Helm** and **GitOps**. Manifests are integrated into the `helmscharts` repository.
 
 ```bash
-helm install mnemosyne ./deploy/helm/mnemosyne \
-  --set secrets.existingSecret=my-secrets
+# Example manual installation
+helm install mnemosyne ./kubernetes/helm \
+  --set config.qdrantUrl="http://qdrant:6333"
 ```
 
-### GitOps (ArgoCD)
+### Auditing Tooling
 
-Mnemosyne is designed to be deployed via ArgoCD. Use the provided Helm chart and point it to your configuration.
+Includes a utility job for identifying non-indexed files within the NFS share:
+```bash
+kubectl apply -f kubernetes/check-index-job.yaml
+```
 
 ## 🛠️ Development
 
-### Setup
+### Prerequisites
+-   Rust 1.80+
+-   Tesseract OCR dev headers (`libtesseract-dev`, `libleptonica-dev`)
 
+### Setup & Run
 ```bash
-cargo build
-```
+# Build
+cargo build --release
 
-### Running
-
-```bash
-cargo run -- --paths /path/to/docs
+# Run Indexing + Server
+cargo run -- --paths /mnt/data --database-url $DB_URL
 ```
 
 ## 📜 Legacy Version
+The original Python implementation and migration notes are preserved in the `python-version/` and `docs/migration/` directories.
 
-The original Python version is preserved in the `python-version/` directory.
+---
+**Mnemosyne** — *Because knowledge is only as powerful as your ability to find it.*
