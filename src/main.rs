@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup logging
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new("info,lopdf=error,pdf_extract=error"));
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr))

@@ -45,11 +45,25 @@ impl FileScanner for LocalFileScanner {
 
         // 2. Load Content
         let content = if path.extension().map(|e| e == "pdf").unwrap_or(false) {
-            match pdf_extract::extract_text(file_path) {
-                Ok(text) if !text.trim().is_empty() => text,
-                _ => {
-                    // TODO: Implement actual OCR with tesseract
-                    format!("[OCR PENDING] Image-based PDF detected: {}", file_path)
+            let fp = file_path.to_string();
+            let handle = tokio::task::spawn_blocking(move || pdf_extract::extract_text(&fp));
+
+            match tokio::time::timeout(std::time::Duration::from_secs(30), handle).await {
+                Ok(Ok(Ok(text))) if !text.trim().is_empty() => text,
+                Ok(Ok(Ok(_))) => {
+                    format!("[OCR PENDING] Empty or image-based PDF detected: {}", file_path)
+                }
+                Ok(Ok(Err(e))) => {
+                    tracing::warn!("Failed to extract PDF {}: {}", file_path, e);
+                    format!("[ERROR] PDF extraction failed: {}", file_path)
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("Blocking task panicked for {}: {}", file_path, e);
+                    format!("[ERROR] PDF extraction panicked: {}", file_path)
+                }
+                Err(_) => {
+                    tracing::warn!("PDF extraction timed out for {}", file_path);
+                    format!("[TIMEOUT] PDF extraction too slow: {}", file_path)
                 }
             }
         } else {
