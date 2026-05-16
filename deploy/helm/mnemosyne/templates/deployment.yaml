@@ -54,7 +54,10 @@ spec:
             - name: LITELLM_URL
               value: {{ .Values.config.litellmUrl | quote }}
             - name: NFS_PATH
-              value: {{ .Values.config.nfsPath | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mnemosyne.fullname" . }}-secrets
+                  key: NFS_PATH
           volumeMounts:
             {{- range .Values.persistence.pvcs }}
             - name: {{ .name }}

@@ -48,14 +48,20 @@ config:
   collectionName: "mnemosyne_docs"
   embeddingModel: "zembed-132k"
   litellmUrl: "http://litellm.litellm.svc.cluster.local:4000"
-  nfsPath: "/data/nfs"
+  nfsPath: "/mnt/xpool"
+  dbUser: "app"
+  dbHost: "cluster-pg-sbx-rw.pg-sbx.svc.cluster.local"
+  dbName: "app"
 
 externalSecrets:
   enabled: true
-  refreshInterval: "1h"
+  refreshInterval: "1m"
   secretStoreName: "vault-backend"
   secretStoreKind: "ClusterSecretStore"
   vaultPath: "ai/mnemosyne"
+  dbVaultPath: "pg-sbx/grafana"
+
+
 
 persistence:
   pvcs:
