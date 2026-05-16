@@ -150,6 +150,25 @@ impl VectorStore for QdrantVectorStore {
                     .get("last_modified")
                     .and_then(|v| v.as_integer())
                     .unwrap_or(0),
+                creation_date: payload
+                    .get("creation_date")
+                    .and_then(|v| v.as_integer())
+                    .unwrap_or(0),
+                file_hash: payload
+                    .get("file_hash")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+                folder_tags: payload
+                    .get("folder_tags")
+                    .and_then(|v| v.as_list())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             };
 
             chunks.push(DocumentChunk {
