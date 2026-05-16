@@ -55,3 +55,81 @@ impl RetrievalUseCase {
         Ok(reranked_results)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::entities::{DocumentChunk, DocumentMetadata};
+    use crate::domain::ports::{VectorStore, EmbeddingService, RerankingService};
+    use async_trait::async_trait;
+    use mockall::mock;
+    use anyhow::Result;
+
+    mock! {
+        pub VectorStoreImpl {}
+        #[async_trait]
+        impl VectorStore for VectorStoreImpl {
+            async fn save_chunks(&self, chunks: Vec<DocumentChunk>, collection_name: &str) -> Result<()>;
+            async fn search(&self, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>>;
+        }
+    }
+
+    mock! {
+        pub EmbeddingServiceImpl {}
+        #[async_trait]
+        impl EmbeddingService for EmbeddingServiceImpl {
+            async fn generate_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>>;
+        }
+    }
+
+    mock! {
+        pub RerankingServiceImpl {}
+        #[async_trait]
+        impl RerankingService for RerankingServiceImpl {
+            async fn rerank(&self, query: &str, documents: Vec<DocumentChunk>, top_n: usize) -> Result<Vec<DocumentChunk>>;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_pipeline() {
+        let mut mock_vs = MockVectorStoreImpl::new();
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        let mut mock_rs = MockRerankingServiceImpl::new();
+
+        let query = "test query";
+        let collection = "test_col";
+
+        // Mock embedding
+        mock_es.expect_generate_embeddings()
+            .returning(|_| Ok(vec![vec![0.1, 0.2]]));
+
+        // Mock search
+        mock_vs.expect_search()
+            .returning(|_, _, _| Ok(vec![DocumentChunk {
+                content: "doc1".to_string(),
+                metadata: DocumentMetadata {
+                    source_path: "p1".to_string(),
+                    file_name: "f1".to_string(),
+                    pvc_name: "pvc1".to_string(),
+                    file_size: 100,
+                    last_modified: 0,
+                },
+                embedding: None,
+                score: Some(0.8),
+            }]));
+
+        // Mock rerank
+        mock_rs.expect_rerank()
+            .returning(|_, docs, _| Ok(docs));
+
+        let use_case = RetrievalUseCase::new(
+            Arc::new(mock_vs),
+            Arc::new(mock_es),
+            Arc::new(mock_rs),
+        );
+
+        let results = use_case.execute(query, collection).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, "doc1");
+    }
+}
