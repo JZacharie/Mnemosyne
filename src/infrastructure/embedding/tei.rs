@@ -14,8 +14,13 @@ pub struct TEIService {
 
 impl TEIService {
     pub fn new(embedder_url: String, reranker_url: String) -> Self {
+        let client = Client::builder()
+            .http1_only()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
         Self {
-            client: Client::new(),
+            client,
             embedder_url,
             reranker_url,
         }
