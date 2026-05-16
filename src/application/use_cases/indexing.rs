@@ -52,11 +52,15 @@ impl IndexingUseCase {
             .map(|c| c.iter().collect())
             .collect();
 
-        let embeddings = self
-            .embedding_service
-            .generate_embeddings(chunks_content.clone())
-            .await?;
-
+        let mut embeddings = Vec::new();
+        for batch in chunks_content.chunks(32) {
+            let batch_embeddings = self
+                .embedding_service
+                .generate_embeddings(batch.to_vec())
+                .await?;
+            embeddings.extend(batch_embeddings);
+        }
+        
         let doc_chunks: Vec<DocumentChunk> = chunks_content
             .into_iter()
             .zip(embeddings)
