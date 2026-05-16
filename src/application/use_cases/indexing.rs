@@ -3,7 +3,9 @@ use crate::domain::ports::{EmbeddingService, FileScanner, VectorStore};
 use anyhow::Result;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+use futures::StreamExt;
 
+#[derive(Clone)]
 pub struct IndexingUseCase {
     file_scanner: Arc<dyn FileScanner>,
     embedding_service: Arc<dyn EmbeddingService>,
@@ -29,12 +31,23 @@ impl IndexingUseCase {
         let file_paths = self.file_scanner.scan_directory(path).await?;
         info!("Found {} files to process", file_paths.len());
 
-        for file_path in file_paths {
-            match self.process_file(&file_path, collection_name).await {
-                Ok(_) => info!("Successfully indexed: {}", file_path),
-                Err(e) => error!("Failed to index {}: {}", file_path, e),
-            }
-        }
+        let concurrency = 8; // Process 8 files in parallel
+        let collection_name = collection_name.to_string();
+
+        futures::stream::iter(file_paths)
+            .map(|file_path| {
+                let this = self.clone();
+                let col_name = collection_name.clone();
+                async move {
+                    match this.process_file(&file_path, &col_name).await {
+                        Ok(_) => info!("Successfully indexed: {}", file_path),
+                        Err(e) => error!("Failed to index {}: {}", file_path, e),
+                    }
+                }
+            })
+            .buffer_unordered(concurrency)
+            .collect::<Vec<()>>()
+            .await;
 
         Ok(())
     }
