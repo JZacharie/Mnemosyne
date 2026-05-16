@@ -36,9 +36,8 @@ impl FileScanner for LocalFileScanner {
     async fn load_document(&self, file_path: &str) -> Result<Document> {
         let path = std::path::Path::new(file_path);
         let content = if path.extension().map(|e| e == "pdf").unwrap_or(false) {
-            // In a real app, we would use a PDF library like `pdf-extract` or `lopdf`
-            // For now, let's assume we can read it as text or return an error if not implemented
-            return Err(anyhow!("PDF loading not yet implemented in Rust version"));
+            pdf_extract::extract_text(file_path)
+                .map_err(|e| anyhow!("Failed to extract PDF text from {}: {}", file_path, e))?
         } else {
             fs::read_to_string(file_path)?
         };

@@ -49,6 +49,7 @@ async-trait = "0.1"
 futures = "0.3"
 dotenvy = "0.15"
 qdrant-client = "1.17.0"
+pdf-extract = "0.7"
 
 [dev-dependencies]
 mockall = "0.14.0"
