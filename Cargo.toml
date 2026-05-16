@@ -50,6 +50,8 @@ futures = "0.3"
 dotenvy = "0.15"
 qdrant-client = "1.17.0"
 pdf-extract = "0.7"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 mockall = "0.14.0"

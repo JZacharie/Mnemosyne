@@ -1,7 +1,8 @@
 use crate::domain::entities::{Document, DocumentMetadata};
 use crate::domain::ports::FileScanner;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
@@ -35,15 +36,45 @@ impl FileScanner for LocalFileScanner {
 
     async fn load_document(&self, file_path: &str) -> Result<Document> {
         let path = std::path::Path::new(file_path);
+
+        // 1. Calculate Hash & Read Bytes
+        let file_bytes = fs::read(file_path)?;
+        let mut hasher = Sha256::new();
+        hasher.update(&file_bytes);
+        let file_hash = hex::encode(hasher.finalize());
+
+        // 2. Load Content
         let content = if path.extension().map(|e| e == "pdf").unwrap_or(false) {
-            pdf_extract::extract_text(file_path)
-                .map_err(|e| anyhow!("Failed to extract PDF text from {}: {}", file_path, e))?
+            match pdf_extract::extract_text(file_path) {
+                Ok(text) if !text.trim().is_empty() => text,
+                _ => {
+                    // TODO: Implement actual OCR with tesseract
+                    format!("[OCR PENDING] Image-based PDF detected: {}", file_path)
+                }
+            }
         } else {
-            fs::read_to_string(file_path)?
+            String::from_utf8_lossy(&file_bytes).to_string()
         };
 
+        // 3. Metadata extraction
         let metadata = fs::metadata(file_path)?;
         let last_modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let creation_date = metadata
+            .created()
+            .unwrap_or(metadata.modified()?)
+            .duration_since(UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        // 4. Folder Tags (Hierarchical location)
+        let folder_tags: Vec<String> = path
+            .parent()
+            .map(|p| {
+                p.components()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .filter(|s| !s.is_empty() && s != "/" && s != ".")
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(Document {
             content,
@@ -57,6 +88,9 @@ impl FileScanner for LocalFileScanner {
                 pvc_name: self.pvc_name.clone(),
                 file_size: metadata.len(),
                 last_modified,
+                creation_date,
+                file_hash,
+                folder_tags,
             },
         })
     }

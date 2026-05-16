@@ -15,6 +15,9 @@ pub struct DocumentMetadata {
     pub pvc_name: String,
     pub file_size: u64,
     pub last_modified: i64,
+    pub creation_date: i64,
+    pub file_hash: String,
+    pub folder_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

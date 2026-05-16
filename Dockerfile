@@ -12,6 +12,12 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY . .
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libtesseract-dev \
+    libleptonica-dev \
+    pkg-config \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
 RUN cargo build --release --bin mnemosyne
 
 # Stage 2: Runtime
@@ -22,6 +28,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
+    tesseract-ocr \
+    libtesseract-dev \
+    libleptonica-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/mnemosyne /usr/local/bin/mnemosyne

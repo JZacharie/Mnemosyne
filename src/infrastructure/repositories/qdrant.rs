@@ -67,6 +67,12 @@ impl VectorStore for QdrantVectorStore {
                     "last_modified".to_string(),
                     chunk.metadata.last_modified.into(),
                 );
+                payload.insert(
+                    "creation_date".to_string(),
+                    chunk.metadata.creation_date.into(),
+                );
+                payload.insert("file_hash".to_string(), chunk.metadata.file_hash.into());
+                payload.insert("folder_tags".to_string(), chunk.metadata.folder_tags.into());
 
                 points.push(PointStruct::new(
                     uuid::Uuid::new_v4().to_string(),
