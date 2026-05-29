@@ -7,6 +7,8 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use axum::{
     routing::post,
     Router,
+    extract::State,
+    http::StatusCode,
 };
 use std::net::SocketAddr;
 
@@ -116,6 +118,8 @@ async fn main() -> anyhow::Result<()> {
         auth_use_case,
         retrieval_use_case,
         collection_name: args.collection_name.clone(),
+        db_pool: pool.clone(),
+        vector_store: vector_store.clone(),
     };
 
     // Build Axum router
@@ -136,8 +140,16 @@ async fn main() -> anyhow::Result<()> {
     info!("🌐 HTTP server listening on {}", addr);
     
     let server_handle = tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-        axum::serve(listener, app).await.unwrap();
+        match tokio::net::TcpListener::bind(&addr).await {
+            Ok(listener) => {
+                if let Err(e) = axum::serve(listener, app).await {
+                    error!("Axum server error: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to bind TCP listener to {}: {}", addr, e);
+            }
+        }
     });
 
     // Run initial indexing for each path
@@ -160,6 +172,38 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_handler() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok", "service": "mnemosyne" }))
+async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let db_status = match sqlx::query("SELECT 1").execute(&state.db_pool).await {
+        Ok(_) => "up",
+        Err(e) => {
+            error!("Database health check failed: {}", e);
+            "down"
+        }
+    };
+
+    let qdrant_status = match state.vector_store.health_check().await {
+        Ok(_) => "up",
+        Err(e) => {
+            error!("Qdrant health check failed: {}", e);
+            "down"
+        }
+    };
+
+    let status = if db_status == "up" && qdrant_status == "up" {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        status,
+        Json(serde_json::json!({
+            "status": if status == StatusCode::OK { "ok" } else { "error" },
+            "service": "mnemosyne",
+            "dependencies": {
+                "database": db_status,
+                "qdrant": qdrant_status,
+            }
+        })),
+    )
 }

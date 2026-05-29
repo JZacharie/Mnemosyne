@@ -13,6 +13,7 @@ pub trait VectorStore: Send + Sync {
         limit: usize,
         collection_name: &str,
     ) -> Result<Vec<DocumentChunk>>;
+    async fn health_check(&self) -> Result<()>;
 }
 
 #[async_trait]

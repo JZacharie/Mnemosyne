@@ -54,4 +54,11 @@ impl VectorStore for PostgresVectorStore {
         // Simple placeholder for now, as we are migrating to Qdrant for performance
         Ok(vec![])
     }
+
+    async fn health_check(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }

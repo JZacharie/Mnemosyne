@@ -11,6 +11,8 @@ pub struct AppState {
     pub auth_use_case: Arc<application::use_cases::auth::AuthUseCase>,
     pub retrieval_use_case: Arc<application::use_cases::retrieval::RetrievalUseCase>,
     pub collection_name: String,
+    pub db_pool: sqlx::PgPool,
+    pub vector_store: Arc<dyn domain::ports::VectorStore>,
 }
 
 impl FromRef<AppState> for Arc<application::use_cases::auth::AuthUseCase> {

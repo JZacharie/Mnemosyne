@@ -193,4 +193,10 @@ impl VectorStore for QdrantVectorStore {
 
         Ok(chunks)
     }
+
+    async fn health_check(&self) -> Result<()> {
+        // Check health of Qdrant client
+        self.client.health_check().await?;
+        Ok(())
+    }
 }
