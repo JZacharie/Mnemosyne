@@ -49,6 +49,12 @@ struct Args {
     #[arg(long, env = "TEI_RERANKER_URL", default_value = "http://mnemosyne-tei-reranker.mnemosyne.svc.cluster.local")]
     tei_reranker_url: String,
 
+    #[arg(long, env = "PYLOS_URL")]
+    pylos_url: Option<String>,
+
+    #[arg(long, env = "PYLOS_API_KEY")]
+    pylos_api_key: Option<String>,
+
     #[arg(long, env = "PVC_NAME", default_value = "unknown")]
     pvc_name: String,
 
@@ -60,6 +66,7 @@ struct Args {
 }
 
 use mnemosyne::AppState;
+use mnemosyne::domain::ports::EmbeddingService;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -79,7 +86,11 @@ async fn main() -> anyhow::Result<()> {
 
     info!("🧠 Mnemosyne Service starting...");
     info!("🚀 Using Qdrant at: {}", args.qdrant_url);
-    info!("📡 Using TEI Embedder at: {}", args.tei_embedder_url);
+    if let Some(ref pylos_url) = args.pylos_url {
+        info!("📡 Using Pylos for embeddings at: {}", pylos_url);
+    } else {
+        info!("📡 Using TEI Embedder at: {}", args.tei_embedder_url);
+    }
     info!("📡 Using TEI Reranker at: {}", args.tei_reranker_url);
 
     // Setup database pool for account management
@@ -93,13 +104,24 @@ async fn main() -> anyhow::Result<()> {
         args.tei_reranker_url,
     ));
 
+    let embedding_service: Arc<dyn EmbeddingService> = if let Some(pylos_url) = args.pylos_url {
+        let api_key = args.pylos_api_key.unwrap_or_default();
+        Arc::new(mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
+            pylos_url,
+            api_key,
+            args.embedding_model.clone(),
+        ))
+    } else {
+        tei_service.clone()
+    };
+
     let vector_store = Arc::new(QdrantVectorStore::new(&args.qdrant_url).await?);
     let account_repo = Arc::new(PostgresAccountRepository::new(pool.clone()));
 
     // Initialize use cases
     let indexing_use_case = Arc::new(IndexingUseCase::new(
         file_scanner,
-        tei_service.clone(),
+        embedding_service.clone(),
         vector_store.clone(),
     ));
     
@@ -110,7 +132,7 @@ async fn main() -> anyhow::Result<()> {
 
     let retrieval_use_case = Arc::new(RetrievalUseCase::new(
         vector_store.clone(),
-        tei_service.clone(),
+        embedding_service.clone(),
         tei_service.clone(),
     ));
 
