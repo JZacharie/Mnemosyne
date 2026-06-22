@@ -84,10 +84,13 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
+    let pylos_url = args.pylos_url.or_else(|| std::env::var("LITELLM_URL").ok());
+    let pylos_api_key = args.pylos_api_key.or_else(|| std::env::var("LITELLM_API_KEY").ok());
+
     info!("🧠 Mnemosyne Service starting...");
     info!("🚀 Using Qdrant at: {}", args.qdrant_url);
-    if let Some(ref pylos_url) = args.pylos_url {
-        info!("📡 Using Pylos for embeddings at: {}", pylos_url);
+    if let Some(ref url) = pylos_url {
+        info!("📡 Using Pylos/LiteLLM for embeddings at: {}", url);
     } else {
         info!("📡 Using TEI Embedder at: {}", args.tei_embedder_url);
     }
@@ -104,10 +107,10 @@ async fn main() -> anyhow::Result<()> {
         args.tei_reranker_url,
     ));
 
-    let embedding_service: Arc<dyn EmbeddingService> = if let Some(pylos_url) = args.pylos_url {
-        let api_key = args.pylos_api_key.unwrap_or_default();
+    let embedding_service: Arc<dyn EmbeddingService> = if let Some(url) = pylos_url {
+        let api_key = pylos_api_key.unwrap_or_default();
         Arc::new(mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
-            pylos_url,
+            url,
             api_key,
             args.embedding_model.clone(),
         ))
