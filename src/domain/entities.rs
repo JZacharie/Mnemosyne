@@ -56,3 +56,21 @@ pub struct Session {
     pub token: String,
     pub expires_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineRun {
+    pub id: Uuid,
+    pub file_path: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub status: String,
+    pub current_step: String,
+    pub ocr_status: String,
+    pub error_message: Option<String>,
+    pub chunks_count: Option<i32>,
+    pub extracted_text: Option<String>,
+    pub chunks: Option<serde_json::Value>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub parameters: Option<serde_json::Value>,
+}

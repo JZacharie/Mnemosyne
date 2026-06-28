@@ -24,6 +24,7 @@ use mnemosyne::application::use_cases::auth::AuthUseCase;
 use mnemosyne::application::use_cases::retrieval::RetrievalUseCase;
 use mnemosyne::interfaces::http::auth_handlers::login_handler;
 use mnemosyne::interfaces::http::query_handlers::search_handler;
+use mnemosyne::interfaces::http::pipeline_handlers::{list_runs_handler, get_run_handler, retry_run_handler};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -99,6 +100,11 @@ async fn main() -> anyhow::Result<()> {
     // Setup database pool for account management
     let pool = PgPool::connect(&args.database_url).await?;
 
+    info!("⚙️ Running database migrations...");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await?;
+
     // Initialize adapters
     let file_scanner = Arc::new(LocalFileScanner::new(args.pvc_name));
     
@@ -126,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         file_scanner,
         embedding_service.clone(),
         vector_store.clone(),
+        account_repo.clone(),
     ));
     
     let auth_use_case = Arc::new(AuthUseCase::new(
@@ -142,6 +149,8 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         auth_use_case,
         retrieval_use_case,
+        indexing_use_case: indexing_use_case.clone(),
+        pipeline_repo: account_repo.clone(),
         collection_name: args.collection_name.clone(),
         db_pool: pool.clone(),
         vector_store: vector_store.clone(),
@@ -152,6 +161,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", axum::routing::get(health_handler))
         .route("/api/auth/login", post(login_handler))
         .route("/api/search", post(search_handler))
+        .route("/api/pipeline/runs", axum::routing::get(list_runs_handler))
+        .route("/api/pipeline/runs/:id", axum::routing::get(get_run_handler))
+        .route("/api/pipeline/retry", post(retry_run_handler))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

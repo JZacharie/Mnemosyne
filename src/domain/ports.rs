@@ -1,4 +1,4 @@
-use crate::domain::entities::{AuditLog, Document, DocumentChunk, User};
+use crate::domain::entities::{AuditLog, Document, DocumentChunk, User, PipelineRun};
 use anyhow::Result;
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -49,4 +49,13 @@ pub trait AuditRepository: Send + Sync {
     async fn log(&self, entry: AuditLog) -> Result<()>;
     #[allow(dead_code)]
     async fn get_by_user(&self, user_id: Uuid) -> Result<Vec<AuditLog>>;
+}
+
+#[async_trait]
+pub trait PipelineRepository: Send + Sync {
+    async fn create_run(&self, run: PipelineRun) -> Result<()>;
+    async fn update_run(&self, run: PipelineRun) -> Result<()>;
+    async fn get_run(&self, id: Uuid) -> Result<Option<PipelineRun>>;
+    async fn get_run_by_file_path(&self, file_path: &str) -> Result<Option<PipelineRun>>;
+    async fn list_runs(&self) -> Result<Vec<PipelineRun>>;
 }
