@@ -1,5 +1,5 @@
-use crate::domain::entities::{AuditLog, User, PipelineRun};
-use crate::domain::ports::{AuditRepository, UserRepository, PipelineRepository};
+use crate::domain::entities::{AuditLog, PipelineRun, User};
+use crate::domain::ports::{AuditRepository, PipelineRepository, UserRepository};
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{PgPool, Row};

@@ -6,8 +6,8 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use uuid::Uuid;
 use tracing::{error, info};
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct RetryRequest {
@@ -83,7 +83,10 @@ pub async fn retry_run_handler(
     let indexing_use_case = state.indexing_use_case.clone();
     let file_path = run.file_path.clone();
 
-    info!("Queueing manual re-run / correction for file: {} (ID: {})", file_path, payload.id);
+    info!(
+        "Queueing manual re-run / correction for file: {} (ID: {})",
+        file_path, payload.id
+    );
 
     // Spawn a background thread/task to process the pipeline asynchronously
     tokio::spawn(async move {

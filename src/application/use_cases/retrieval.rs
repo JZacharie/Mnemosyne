@@ -60,10 +60,10 @@ impl RetrievalUseCase {
 mod tests {
     use super::*;
     use crate::domain::entities::{DocumentChunk, DocumentMetadata};
-    use crate::domain::ports::{VectorStore, EmbeddingService, RerankingService};
+    use crate::domain::ports::{EmbeddingService, RerankingService, VectorStore};
+    use anyhow::Result;
     use async_trait::async_trait;
     use mockall::mock;
-    use anyhow::Result;
 
     mock! {
         pub VectorStoreImpl {}
@@ -101,12 +101,13 @@ mod tests {
         let collection = "test_col";
 
         // Mock embedding
-        mock_es.expect_generate_embeddings()
+        mock_es
+            .expect_generate_embeddings()
             .returning(|_| Ok(vec![vec![0.1, 0.2]]));
 
         // Mock search
-        mock_vs.expect_search()
-            .returning(|_, _, _, _| Ok(vec![DocumentChunk {
+        mock_vs.expect_search().returning(|_, _, _, _| {
+            Ok(vec![DocumentChunk {
                 content: "doc1".to_string(),
                 metadata: DocumentMetadata {
                     source_path: "p1".to_string(),
@@ -120,17 +121,14 @@ mod tests {
                 },
                 embedding: None,
                 score: Some(0.8),
-            }]));
+            }])
+        });
 
         // Mock rerank
-        mock_rs.expect_rerank()
-            .returning(|_, docs, _| Ok(docs));
+        mock_rs.expect_rerank().returning(|_, docs, _| Ok(docs));
 
-        let use_case = RetrievalUseCase::new(
-            Arc::new(mock_vs),
-            Arc::new(mock_es),
-            Arc::new(mock_rs),
-        );
+        let use_case =
+            RetrievalUseCase::new(Arc::new(mock_vs), Arc::new(mock_es), Arc::new(mock_rs));
 
         let results = use_case.execute(query, collection).await.unwrap();
         assert_eq!(results.len(), 1);

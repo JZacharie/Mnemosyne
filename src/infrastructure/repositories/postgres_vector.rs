@@ -56,9 +56,7 @@ impl VectorStore for PostgresVectorStore {
     }
 
     async fn health_check(&self) -> Result<()> {
-        sqlx::query("SELECT 1")
-            .execute(&self.pool)
-            .await?;
+        sqlx::query("SELECT 1").execute(&self.pool).await?;
         Ok(())
     }
 }

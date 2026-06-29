@@ -51,7 +51,10 @@ impl FileScanner for LocalFileScanner {
             match tokio::time::timeout(std::time::Duration::from_secs(30), handle).await {
                 Ok(Ok(Ok(text))) if !text.trim().is_empty() => text,
                 Ok(Ok(Ok(_))) => {
-                    format!("[OCR PENDING] Empty or image-based PDF detected: {}", file_path)
+                    format!(
+                        "[OCR PENDING] Empty or image-based PDF detected: {}",
+                        file_path
+                    )
                 }
                 Ok(Ok(Err(e))) => {
                     tracing::warn!("Failed to extract PDF {}: {}", file_path, e);

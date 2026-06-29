@@ -1,11 +1,11 @@
 use crate::domain::entities::{DocumentChunk, PipelineRun};
-use crate::domain::ports::{EmbeddingService, FileScanner, VectorStore, PipelineRepository};
+use crate::domain::ports::{EmbeddingService, FileScanner, PipelineRepository, VectorStore};
 use anyhow::Result;
+use chrono::Utc;
+use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{error, info};
-use futures::StreamExt;
 use uuid::Uuid;
-use chrono::Utc;
 
 #[derive(Clone)]
 pub struct IndexingUseCase {
@@ -58,7 +58,8 @@ impl IndexingUseCase {
     }
 
     pub async fn process_file(&self, file_path: &str, collection_name: &str) -> Result<()> {
-        self.process_file_with_params(file_path, collection_name, 1000, 0, None).await
+        self.process_file_with_params(file_path, collection_name, 1000, 0, None)
+            .await
     }
 
     pub async fn process_file_with_params(
@@ -113,7 +114,17 @@ impl IndexingUseCase {
             let _ = self.pipeline_repo.create_run(run.clone()).await;
         }
 
-        match self.process_file_internal(file_path, collection_name, chunk_size, chunk_overlap, custom_text, &mut run).await {
+        match self
+            .process_file_internal(
+                file_path,
+                collection_name,
+                chunk_size,
+                chunk_overlap,
+                custom_text,
+                &mut run,
+            )
+            .await
+        {
             Ok(_) => {
                 run.status = "COMPLETED".to_string();
                 run.current_step = "COMPLETE".to_string();
@@ -171,7 +182,7 @@ impl IndexingUseCase {
         // Step 2: Chunking logic
         let content_chars: Vec<char> = doc.content.chars().collect();
         let mut chunks_content = Vec::new();
-        
+
         let mut start = 0;
         while start < content_chars.len() {
             let end = std::cmp::min(start + chunk_size, content_chars.len());

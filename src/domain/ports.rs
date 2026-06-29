@@ -1,4 +1,4 @@
-use crate::domain::entities::{AuditLog, Document, DocumentChunk, User, PipelineRun};
+use crate::domain::entities::{AuditLog, Document, DocumentChunk, PipelineRun, User};
 use anyhow::Result;
 use async_trait::async_trait;
 use uuid::Uuid;

@@ -16,8 +16,7 @@ pub struct QdrantVectorStore {
 
 impl QdrantVectorStore {
     pub async fn new(url: &str) -> Result<Self> {
-        let client = Qdrant::from_url(url)
-            .build()?;
+        let client = Qdrant::from_url(url).build()?;
         Ok(Self { client })
     }
 
@@ -121,7 +120,9 @@ impl VectorStore for QdrantVectorStore {
         // Hybrid Search: Vector Search narrowed by Full-Text filtering
         let request = QueryPointsBuilder::new(collection_name)
             .query(query_vector)
-            .filter(Filter::must(vec![Condition::matches_text("content", query_text)]))
+            .filter(Filter::must(vec![Condition::matches_text(
+                "content", query_text,
+            )]))
             .limit(limit as u64)
             .with_payload(true)
             .build();
