@@ -2,7 +2,7 @@ use crate::domain::entities::{DocumentChunk, PipelineRun};
 use crate::domain::ports::{EmbeddingService, FileScanner, VectorStore, PipelineRepository};
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use futures::StreamExt;
 use uuid::Uuid;
 use chrono::Utc;
@@ -152,11 +152,10 @@ impl IndexingUseCase {
         } else {
             let doc = self.file_scanner.load_document(file_path).await?;
             if file_path.to_lowercase().ends_with(".pdf") {
-                if doc.content.contains("[OCR PENDING]") {
-                    run.ocr_status = "FAILED".to_string();
-                } else if doc.content.contains("[ERROR]") {
-                    run.ocr_status = "FAILED".to_string();
-                } else if doc.content.contains("[TIMEOUT]") {
+                if doc.content.contains("[OCR PENDING]")
+                    || doc.content.contains("[ERROR]")
+                    || doc.content.contains("[TIMEOUT]")
+                {
                     run.ocr_status = "FAILED".to_string();
                 } else {
                     run.ocr_status = "SUCCESS".to_string();
