@@ -51,7 +51,7 @@ config:
   nfsPath: "/mnt/xpool"
   dbUser: "app"
   dbHost: "cluster-pg-sbx-rw.pg-sbx.svc.cluster.local"
-  dbName: "app"
+  dbName: "mnemosyne"
 
 externalSecrets:
   enabled: true
