@@ -61,6 +61,14 @@ pub trait PipelineRepository: Send + Sync {
     async fn get_run_by_file_path(&self, file_path: &str) -> Result<Option<PipelineRun>>;
     async fn list_runs(&self) -> Result<Vec<PipelineRun>>;
     async fn get_indexing_stats(&self) -> Result<Value>;
+    async fn log_search(
+        &self,
+        id: Uuid,
+        query: &str,
+        results_count: i32,
+        duration_ms: i32,
+    ) -> Result<()>;
+    async fn get_usage_stats(&self) -> Result<Value>;
 }
 
 #[async_trait]

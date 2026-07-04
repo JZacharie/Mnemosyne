@@ -78,9 +78,18 @@ pub async fn indexing_stats_handler(State(state): State<AppState>) -> impl IntoR
         }
     };
 
+    let usage_stats = match state.pipeline_repo.get_usage_stats().await {
+        Ok(stats) => stats,
+        Err(e) => {
+            error!("Failed to get usage stats: {}", e);
+            serde_json::json!({ "error": e.to_string() })
+        }
+    };
+
     Json(serde_json::json!({
         "indexing": db_stats,
         "vector_database": qdrant_info,
+        "usage": usage_stats,
     }))
     .into_response()
 }

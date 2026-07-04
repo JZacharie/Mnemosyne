@@ -216,23 +216,10 @@ impl IndexingUseCase {
                 .generate_text(meta_system, &meta_user)
                 .await
             {
-                #[derive(Deserialize)]
-                struct TempMeta {
-                    inferred_tags: Option<Vec<String>>,
-                    document_summary: Option<String>,
-                    detected_entities: Option<Vec<String>>,
-                }
-                if let Ok(parsed) = serde_json::from_str::<TempMeta>(&meta_raw) {
+                if let Some(parsed) = parse_llm_metadata(&meta_raw) {
                     doc.metadata.inferred_tags = parsed.inferred_tags;
                     doc.metadata.document_summary = parsed.document_summary;
                     doc.metadata.detected_entities = parsed.detected_entities;
-                } else {
-                    let clean_raw = meta_raw.replace("```json", "").replace("```", "");
-                    if let Ok(parsed) = serde_json::from_str::<TempMeta>(&clean_raw) {
-                        doc.metadata.inferred_tags = parsed.inferred_tags;
-                        doc.metadata.document_summary = parsed.document_summary;
-                        doc.metadata.detected_entities = parsed.detected_entities;
-                    }
                 }
             }
         }
@@ -245,19 +232,11 @@ impl IndexingUseCase {
         let chunks_content = split_text(&doc.content, chunk_size, chunk_overlap);
 
         // Prepend context summary to each chunk
-        let enriched_chunks: Vec<String> = if !doc_context.is_empty() {
-            chunks_content
-                .iter()
-                .map(|chunk| {
-                    format!(
-                        "Document: {}\nContext: {}\nChunk Content: {}",
-                        doc.metadata.file_name, doc_context, chunk
-                    )
-                })
-                .collect()
-        } else {
-            chunks_content.clone()
-        };
+        let enriched_chunks = enrich_chunks_with_context(
+            chunks_content.clone(),
+            &doc.metadata.file_name,
+            &doc_context,
+        );
 
         run.chunks_count = Some(chunks_content.len() as i32);
         run.chunks = Some(serde_json::to_value(&chunks_content).unwrap_or(serde_json::Value::Null));
@@ -295,6 +274,35 @@ impl IndexingUseCase {
 
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+struct LlmMetadata {
+    inferred_tags: Option<Vec<String>>,
+    document_summary: Option<String>,
+    detected_entities: Option<Vec<String>>,
+}
+
+fn enrich_chunks_with_context(chunks: Vec<String>, file_name: &str, context: &str) -> Vec<String> {
+    if context.is_empty() {
+        return chunks;
+    }
+    chunks
+        .iter()
+        .map(|chunk| {
+            format!(
+                "Document: {}\nContext: {}\nChunk Content: {}",
+                file_name, context, chunk
+            )
+        })
+        .collect()
+}
+
+fn parse_llm_metadata(raw: &str) -> Option<LlmMetadata> {
+    serde_json::from_str::<LlmMetadata>(raw).ok().or_else(|| {
+        let clean = raw.replace("```json", "").replace("```", "");
+        serde_json::from_str::<LlmMetadata>(&clean).ok()
+    })
 }
 
 fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String> {
@@ -430,6 +438,8 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
 mod tests {
     use super::*;
 
+    // --- split_text tests ---
+
     #[test]
     fn test_split_text_simple() {
         let text = "Hello world from Mnemosyne RAG";
@@ -455,5 +465,164 @@ mod tests {
         for chunk in &chunks {
             assert!(chunk.chars().count() <= 15);
         }
+    }
+
+    #[test]
+    fn test_split_text_empty() {
+        let chunks = split_text("", 10, 0);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_split_text_whitespace_only() {
+        let chunks = split_text("   \n  \n   ", 10, 0);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_split_text_small_content() {
+        let text = "Small";
+        let chunks = split_text(text, 100, 0);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "Small");
+    }
+
+    #[test]
+    fn test_split_text_with_overlap() {
+        let text = "aaa bbb ccc ddd eee";
+        let chunks = split_text(text, 8, 4);
+        assert!(chunks.len() >= 3);
+        if chunks.len() >= 2 {
+            let overlap = &chunks[1];
+            assert!(!overlap.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_split_text_no_overlap_exact() {
+        let text = "aaaa bbbb cccc";
+        let chunks = split_text(text, 5, 0);
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 5);
+        }
+    }
+
+    #[test]
+    fn test_split_text_unicode() {
+        let text = "éèêë àâäùûü öôœ";
+        let chunks = split_text(text, 6, 0);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 6);
+        }
+    }
+
+    #[test]
+    fn test_split_text_large_chunk_exact() {
+        let text = "A".repeat(100);
+        let chunks = split_text(&text, 50, 0);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 50);
+        assert_eq!(chunks[1].len(), 50);
+    }
+
+    // --- enrich_chunks_with_context tests ---
+
+    #[test]
+    fn test_enrich_chunks_with_context() {
+        let chunks = vec!["chunk1".to_string(), "chunk2".to_string()];
+        let result = enrich_chunks_with_context(chunks, "doc.md", "summary text");
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0],
+            "Document: doc.md\nContext: summary text\nChunk Content: chunk1"
+        );
+        assert_eq!(
+            result[1],
+            "Document: doc.md\nContext: summary text\nChunk Content: chunk2"
+        );
+    }
+
+    #[test]
+    fn test_enrich_chunks_empty_context() {
+        let chunks = vec!["chunk1".to_string()];
+        let result = enrich_chunks_with_context(chunks.clone(), "doc.md", "");
+        assert_eq!(result, chunks);
+    }
+
+    #[test]
+    fn test_enrich_chunks_empty_chunks() {
+        let result = enrich_chunks_with_context(vec![], "doc.md", "context");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_enrich_chunks_special_chars() {
+        let chunks = vec!["line1\nline2".to_string()];
+        let result =
+            enrich_chunks_with_context(chunks, "fichier spécial.md", "contexte avec émoji");
+        assert_eq!(
+            result[0],
+            "Document: fichier spécial.md\nContext: contexte avec émoji\nChunk Content: line1\nline2"
+        );
+    }
+
+    // --- parse_llm_metadata tests ---
+
+    #[test]
+    fn test_parse_llm_metadata_valid() {
+        let raw = r#"{"inferred_tags":["rust","ai"],"document_summary":"A summary.","detected_entities":["entity1"]}"#;
+        let parsed = parse_llm_metadata(raw).unwrap();
+        assert_eq!(
+            parsed.inferred_tags,
+            Some(vec!["rust".to_string(), "ai".to_string()])
+        );
+        assert_eq!(parsed.document_summary, Some("A summary.".to_string()));
+        assert_eq!(parsed.detected_entities, Some(vec!["entity1".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_markdown_fenced() {
+        let raw = "```json\n{\"inferred_tags\":[\"tag1\"],\"document_summary\":\"Sum\",\"detected_entities\":[]}\n```";
+        let parsed = parse_llm_metadata(raw).unwrap();
+        assert_eq!(parsed.inferred_tags, Some(vec!["tag1".to_string()]));
+        assert_eq!(parsed.document_summary, Some("Sum".to_string()));
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_partial_fields() {
+        let raw = r#"{"inferred_tags":["test"]}"#;
+        let parsed = parse_llm_metadata(raw).unwrap();
+        assert_eq!(parsed.inferred_tags, Some(vec!["test".to_string()]));
+        assert!(parsed.document_summary.is_none());
+        assert!(parsed.detected_entities.is_none());
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_empty_object() {
+        let parsed = parse_llm_metadata("{}").unwrap();
+        assert!(parsed.inferred_tags.is_none());
+        assert!(parsed.document_summary.is_none());
+        assert!(parsed.detected_entities.is_none());
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_invalid_json() {
+        let parsed = parse_llm_metadata("not json at all");
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_empty_string() {
+        let parsed = parse_llm_metadata("");
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn test_parse_llm_metadata_fallback_plain_fence() {
+        let raw = "```\n{\"inferred_tags\":[\"plain\"],\"document_summary\":\"No lang hint\"}\n```";
+        let parsed = parse_llm_metadata(raw).unwrap();
+        assert_eq!(parsed.inferred_tags, Some(vec!["plain".to_string()]));
+        assert_eq!(parsed.document_summary, Some("No lang hint".to_string()));
     }
 }

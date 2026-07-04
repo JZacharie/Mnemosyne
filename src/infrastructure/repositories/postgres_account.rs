@@ -277,4 +277,79 @@ impl PipelineRepository for PostgresAccountRepository {
             "total_file_size_bytes": total_file_size.unwrap_or(0),
         }))
     }
+
+    async fn log_search(
+        &self,
+        id: Uuid,
+        query: &str,
+        results_count: i32,
+        duration_ms: i32,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO search_logs (id, query, results_count, search_duration_ms) VALUES ($1, $2, $3, $4)"
+        )
+        .bind(id)
+        .bind(query)
+        .bind(results_count)
+        .bind(duration_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_usage_stats(&self) -> Result<Value> {
+        let total_searches: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM search_logs")
+            .fetch_one(&self.pool)
+            .await?;
+
+        let searches_today: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM search_logs WHERE created_at >= CURRENT_DATE")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let searches_this_week: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM search_logs WHERE created_at >= date_trunc('week', CURRENT_DATE)",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let avg_duration: Option<f64> =
+            sqlx::query_scalar("SELECT AVG(search_duration_ms) FROM search_logs")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let total_results: Option<i64> =
+            sqlx::query_scalar("SELECT SUM(results_count) FROM search_logs")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let zero_result_searches: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM search_logs WHERE results_count = 0")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let top_queries: Vec<Value> = sqlx::query(
+            "SELECT query, COUNT(*) as freq FROM search_logs GROUP BY query ORDER BY freq DESC LIMIT 10"
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "query": row.get::<String, _>("query"),
+                "count": row.get::<i64, _>("freq"),
+            })
+        })
+        .collect();
+
+        Ok(serde_json::json!({
+            "total_searches": total_searches,
+            "searches_today": searches_today,
+            "searches_this_week": searches_this_week,
+            "average_duration_ms": avg_duration.unwrap_or(0.0),
+            "total_results_returned": total_results.unwrap_or(0),
+            "zero_result_searches": zero_result_searches,
+            "top_queries": top_queries,
+        }))
+    }
 }

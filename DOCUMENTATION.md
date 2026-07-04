@@ -1,6 +1,6 @@
 # Mnemosyne — Documentation Complète
 
-> Mnemosyne est un moteur d'indexation **RAG** (Retrieval-Augmented Generation) et de **recherche hybride** haute performance, écrit en Rust. Il indexe des documents (PDF, Markdown, TXT, Log) dans une base vectorielle Qdrant et expose une API REST pour la recherche sémantique avec reranking.
+> Mnemosyne est un moteur d'indexation **RAG** (Retrieval-Augmented Generation) et de **recherche hybride** haute performance, écrit en Rust. Il indexe des documents (PDF, Markdown, TXT, Log) dans une base vectorielle Qdrant, enrichit les chunks avec du contexte via LLM, et expose une API REST pour la recherche sémantique avec reranking.
 
 ---
 
@@ -28,11 +28,13 @@
 
 ## 1. Présentation
 
-**Mnemosyne** (déesse grecque de la mémoire) est un service d'indexation et de recherche RAG conçu pour les lacs de données à grande échelle. Il transforme des documents bruts en chunks vectorisés, les stocke dans **Qdrant**, et permet une **recherche hybride** (vectorielle + texte intégral) avec **reranking** via TEI (Text Embeddings Inference).
+**Mnemosyne** (déesse grecque de la mémoire) est un service d'indexation et de recherche RAG conçu pour les lacs de données à grande échelle. Il transforme des documents bruts en chunks vectorisés enrichis par LLM, les stocke dans **Qdrant**, et permet une **recherche hybride** (vectorielle + texte intégral) avec **reranking** via TEI (Text Embeddings Inference).
 
 ### Objectifs
 
 - Indexer des millions de documents avec un débit élevé (concurrence configurable)
+- Enrichir les chunks avec le résumé et le contexte du document via LLM
+- Extraire automatiquement des métadonnées structurées (tags, entités, résumé)
 - Fournir une recherche sémantique contextuelle avec des résultats pertinents
 - S'intégrer dans une infrastructure Kubernetes avec GitOps (Helm, ArgoCD)
 - Assurer l'observabilité via des logs structurés et une API de monitoring
@@ -44,56 +46,57 @@
 ### Architecture Hexagonale (Ports & Adapters)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    INTERFACES                           │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │                   HTTP (Axum)                      │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌───────────────────┐  │ │
-│  │  │ Auth     │ │ Search   │ │ Pipeline Monitor  │  │ │
-│  │  │ Handlers │ │ Handlers │ │ Handlers          │  │ │
-│  │  └────┬─────┘ └────┬─────┘ └────────┬──────────┘  │ │
-│  └───────┼─────────────┼────────────────┼──────────────┘ │
-└──────────┼─────────────┼────────────────┼────────────────┘
-           │             │                │
-┌──────────┼─────────────┼────────────────┼────────────────┐
-│          ▼             ▼                ▼                │
-│                 APPLICATION (Use Cases)                  │
-│  ┌────────────────┐ ┌──────────────┐ ┌───────────────┐  │
-│  │ Authentication │ │  Indexing    │ │  Retrieval    │  │
-│  │ Use Case       │ │  Use Case    │ │  Use Case     │  │
-│  └───────┬────────┘ └──────┬───────┘ └───────┬───────┘  │
-└──────────┼─────────────────┼─────────────────┼──────────┘
-           │                 │                 │
-┌──────────┼─────────────────┼─────────────────┼──────────┐
-│          ▼                 ▼                 ▼          │
-│                   DOMAIN (Ports)                        │
-│  ┌──────────┐ ┌────────────┐ ┌─────────────┐           │
-│  │ Vector   │ │ Embedding  │ │ Reranking   │           │
-│  │ Store    │ │ Service    │ │ Service     │           │
-│  └────┬─────┘ └─────┬──────┘ └──────┬──────┘           │
-│  ┌────┴────┐ ┌──────┴───────┐       │                  │
-│  │ File    │ │ User/Audit/ │       │                  │
-│  │ Scanner │ │ Pipeline    │       │                  │
-│  └─────────┘ │ Repository  │       │                  │
-│              └─────────────┘       │                  │
-└────────────────────────────────────┼──────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        INTERFACES                                │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │                     HTTP (Axum)                             │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────────────────────┐    │ │
+│  │  │ Auth     │ │ Search   │ │ Pipeline / Stats / Retry │    │ │
+│  │  │ Handlers │ │ Handlers │ │ Handlers                 │    │ │
+│  │  └────┬─────┘ └────┬─────┘ └───────────┬──────────────┘    │ │
+│  └───────┼─────────────┼───────────────────┼───────────────────┘ │
+└──────────┼─────────────┼───────────────────┼─────────────────────┘
+           │             │                   │
+┌──────────┼─────────────┼───────────────────┼─────────────────────┐
+│          ▼             ▼                   ▼                     │
+│                    APPLICATION (Use Cases)                       │
+│  ┌────────────────┐ ┌──────────────┐ ┌──────────────────────┐   │
+│  │ Authentication │ │  Indexing    │ │  Retrieval           │   │
+│  │ Use Case       │ │  Use Case    │ │  Use Case            │   │
+│  │                │ │  (LLM enrich)│ │  (embed→search→rerank)│  │
+│  └───────┬────────┘ └──────┬───────┘ └──────────┬───────────┘   │
+└──────────┼─────────────────┼────────────────────┼───────────────┘
+           │                 │                    │
+┌──────────┼─────────────────┼────────────────────┼───────────────┐
+│          ▼                 ▼                    ▼               │
+│                        DOMAIN (Ports)                           │
+│  ┌──────────┐ ┌────────────┐ ┌──────────────┐                  │
+│  │ Vector   │ │ Embedding  │ │ LLMService   │                  │
+│  │ Store    │ │ Service    │ │ (TEXT GEN)   │                  │
+│  └────┬─────┘ └─────┬──────┘ └──────┬───────┘                  │
+│  ┌────┴────┐ ┌──────┴───────┐       │                         │
+│  │ File    │ │ User/Audit/ │       │  ┌────────────┐        │
+│  │ Scanner │ │ Pipeline    │       │  │ Reranking  │        │
+│  └─────────┘ │ Repository  │       │  │ Service    │        │
+│              └─────────────┘       │  └────────────┘        │
+└────────────────────────────────────┼──────────────────────────┘
                                      │
-┌────────────────────────────────────┼──────────────────┐
-│           INFRASTRUCTURE (Adapters)▼                  │
-│  ┌──────────┐ ┌──────────────┐ ┌──────────────┐      │
-│  │ Qdrant   │ │ TEI Service  │ │ LiteLLM      │      │
-│  │ Vector   │ │ (Embed +     │ │ Embedding    │      │
-│  │ Store    │ │  Rerank)     │ │ Service      │      │
-│  └──────────┘ └──────────────┘ └──────────────┘      │
-│  ┌──────────┐ ┌────────────────────────────────┐      │
-│  │ Local    │ │ PostgresAccountRepository      │      │
-│  │ File     │ │ (User, Audit, Pipeline)        │      │
-│  │ Scanner  │ └────────────────────────────────┘      │
-│  └──────────┘                                         │
-│  ┌────────────────────────────────────────────┐       │
-│  │ PostgresVectorStore (Legacy, pgvector)     │       │
-│  └────────────────────────────────────────────┘       │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────┼──────────────────────────┐
+│           INFRASTRUCTURE (Adapters)▼                          │
+│  ┌──────────┐ ┌──────────────┐ ┌─────────────────────┐       │
+│  │ Qdrant   │ │ TEI Service  │ │ LiteLLMTextService  │       │
+│  │ Vector   │ │ (Embed +     │ │ (LLM: résumé, tags, │       │
+│  │ Store    │ │  Rerank)     │ │  entités)           │       │
+│  └──────────┘ └──────────────┘ └─────────────────────┘       │
+│  ┌──────────┐ ┌──────────────────────────────────────┐       │
+│  │ Local    │ │ PostgresAccountRepository            │       │
+│  │ File     │ │ (User, Audit, Pipeline, Stats)       │       │
+│  │ Scanner  │ └──────────────────────────────────────┘       │
+│  └──────────┘                                                │
+│  ┌─────────────────────────────────────────────────┐        │
+│  │ LiteLLMEmbeddingService (embedding OpenAI-compat)│        │
+│  └─────────────────────────────────────────────────┘        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Flux de démarrage
@@ -102,28 +105,29 @@
 main()
   │
   ├─ dotenv() ──────────────── Chargement .env
-  ├─ tracing_subscriber ─────── Logs structurés
+  ├─ tracing_subscriber ─────── Logs structurés stderr
   ├─ PgPool::connect ────────── Connexion PostgreSQL
-  ├─ sqlx::migrate ──────────── Migrations DB
+  ├─ sqlx::migrate ──────────── Migrations DB automatiques
   │
   ├─ Initialisation adapters
-  │   ├─ LocalFileScanner
-  │   ├─ TEIService (embed + rerank)
-  │   ├─ LiteLLMEmbeddingService (optionnel)
-  │   ├─ QdrantVectorStore
-  │   └─ PostgresAccountRepository
+  │   ├─ LocalFileScanner(pvc_name)
+  │   ├─ TEIService(embed_url, rerank_url)
+  │   ├─ LiteLLMEmbeddingService (si PYLOS_URL défini)
+  │   ├─ QdrantVectorStore(qdrant_url)
+  │   ├─ PostgresAccountRepository(pool)
+  │   └─ LiteLLMTextService(pylos_url, api_key, LLM_MODEL)
   │
   ├─ Initialisation use cases
-  │   ├─ IndexingUseCase
-  │   ├─ AuthUseCase
-  │   └─ RetrievalUseCase
+  │   ├─ IndexingUseCase (scanner, embed, vector, repo, llm)
+  │   ├─ AuthUseCase(user_repo, audit_repo)
+  │   └─ RetrievalUseCase(vector, embed, rerank)
   │
-  ├─ AppState ───────────────── État partagé
+  ├─ AppState ───────────────── État partagé (tous les use cases)
   ├─ Axum Router ─────────────── Routes REST
-  ├─ tokio::spawn HTTP server ── Serveur asynchrone
+  ├─ tokio::spawn HTTP server ── Serveur asynchrone (background)
   │
-  └─ Indexation initiale
-      └─ IndexingUseCase::execute() pour chaque path
+  └─ Indexation initiale synchrone
+      └─ IndexingUseCase::execute(path) pour chaque --paths
 ```
 
 ---
@@ -134,27 +138,27 @@ main()
 
 | Fichier | Description |
 |---------|-------------|
-| `entities.rs` | Entités du domaine : `Document`, `DocumentMetadata`, `DocumentChunk`, `User`, `AuditLog`, `Session`, `PipelineRun` |
-| `ports.rs` | Traits (interfaces) : `VectorStore`, `EmbeddingService`, `RerankingService`, `FileScanner`, `UserRepository`, `AuditRepository`, `PipelineRepository` |
+| `entities.rs` | Entités : `Document`, `DocumentMetadata` (avec `inferred_tags`, `document_summary`, `detected_entities`), `DocumentChunk`, `User`, `AuditLog`, `Session`, `PipelineRun` |
+| `ports.rs` | Traits : `VectorStore`, `EmbeddingService`, `RerankingService`, `FileScanner`, `UserRepository`, `AuditRepository`, `PipelineRepository`, **`LLMService`** |
 
 ### 3.2 `src/application/use_cases/` — Cas d'usage
 
 | Fichier | Description |
 |---------|-------------|
-| `indexing.rs` | Orchestration du pipeline d'indexation (scan → parse → chunk → embed → store) |
-| `retrieval.rs` | Recherche hybride : embed → vector search (top 50) → rerank (top 5) |
+| `indexing.rs` | Pipeline d'indexation complet : scan → parse → LLM enrich (résumé + métadonnées) → chunk → enrich context → embed → store |
+| `retrieval.rs` | Recherche hybride : embed → vector search (top 50) → rerank TEI (top 5) |
 | `auth.rs` | Authentification utilisateur avec audit logging |
 
 ### 3.3 `src/infrastructure/` — Adaptateurs
 
 | Fichier | Description |
 |---------|-------------|
-| `repositories/qdrant.rs` | Implémentation `VectorStore` pour Qdrant (collection, upsert, search, health, infos) |
-| `repositories/file_scanner.rs` | Scan disque local via `walkdir`, extraction PDF via `pdf_oxide`, hash SHA256 |
-| `repositories/postgres_account.rs` | Implémente `UserRepository`, `AuditRepository`, `PipelineRepository` via sqlx |
-| `repositories/postgres_vector.rs` | Legacy `VectorStore` via pgvector (en migration vers Qdrant) |
-| `embedding/tei.rs` | Services d'embedding et reranking via TEI (HuggingFace) |
-| `embedding/litellm.rs` | Service d'embedding via LiteLLM (compatible OpenAI) |
+| `repositories/qdrant.rs` | `VectorStore` pour Qdrant : création collection, upsert points (avec metadata enrichie), search, health, collection_info |
+| `repositories/file_scanner.rs` | Scan disque via `walkdir`, extraction PDF via `pdf_oxide` (timeout 30s, spawn_blocking), hash SHA256, métadonnées |
+| `repositories/postgres_account.rs` | Implémente 3 traits : `UserRepository`, `AuditRepository`, `PipelineRepository` (CRUD + `get_indexing_stats`) |
+| `repositories/postgres_vector.rs` | Legacy `VectorStore` via pgvector (en migration) |
+| `embedding/tei.rs` | Services TEI : `POST /embed` (embedding) + `POST /rerank` (reranking) |
+| `embedding/litellm.rs` | **Deux services** : `LiteLLMEmbeddingService` (OpenAI-compatible embeddings) + **`LiteLLMTextService`** (chat completion pour enrichissement LLM) |
 
 ### 3.4 `src/interfaces/http/` — API REST
 
@@ -162,80 +166,126 @@ main()
 |---------|-------------|
 | `auth_handlers.rs` | `POST /api/auth/login` |
 | `query_handlers.rs` | `POST /api/search` |
-| `pipeline_handlers.rs` | `GET /api/pipeline/runs`, `GET .../:id`, `POST .../retry`, `GET /api/indexing/stats` |
+| `pipeline_handlers.rs` | `GET /api/pipeline/runs`, `GET .../:id`, `POST .../retry`, **`GET /api/indexing/stats`** |
 
 ---
 
 ## 4. Pipeline d'indexation
 
 ```
-                     IndexingUseCase::execute(path)
-                               │
-                               ▼
-                    scan_directory(path)
-                    ┌──────────────────────┐
-                    │  walkdir récursif    │
-                    │  Extensions: pdf,    │
-                    │  md, txt, log        │
-                    └──────────┬───────────┘
-                               │ Vec<file_paths>
-                               ▼
-              futures::stream::iter(file_paths)
-              .buffer_unordered(8)     ← Concurrence = 8
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-         process_file()   process_file()   process_file()
-              │                │                │
-              ▼                ▼                ▼
-         PipelineRun CREATE / UPDATE (PostgreSQL)
-         status: "IN_PROGRESS"
-              │
-              ▼
-    ┌─────────────────────────────────────────┐
-    │         process_file_internal()         │
-    │                                         │
-    │  Étape 1: PARSING                       │
-    │  ┌─────────────────────────────────┐    │
-    │  │ load_document(file_path)       │    │
-    │  │ - SHA256 hash                  │    │
-    │  │ - PDF: pdf_oxide (30s timeout) │    │
-    │  │ - Autres: UTF-8 read          │    │
-    │  │ - Métadonnées: size, dates,   │    │
-    │  │   folder_tags, pvc_name      │    │
-    │  │ - OCR status: SUCCESS/FAILED  │    │
-    │  └──────────────┬──────────────────┘    │
-    │                 ▼                       │
-    │  Étape 2: CHUNKING                      │
-    │  ┌─────────────────────────────────┐    │
-    │  │ split_text(content, chunk_size, │    │
-    │  │              chunk_overlap)    │    │
-    │  │ Séparateurs: \n\n → \n → " " → "" │  │
-    │  │ Défaut: chunk_size=1000,       │    │
-    │  │         chunk_overlap=0        │    │
-    │  └──────────────┬──────────────────┘    │
-    │                 ▼                       │
-    │  Étape 3: EMBEDDING                     │
-    │  ┌─────────────────────────────────┐    │
-    │  │ Par batch de 32 chunks         │    │
-    │  │ EmbeddingService               │    │
-    │  │  → TEI (POST /embed)           │    │
-    │  │  → ou LiteLLM (POST /v1/emb.) │    │
-    │  └──────────────┬──────────────────┘    │
-    │                 ▼                       │
-    │  Étape 4: STORING                       │
-    │  ┌─────────────────────────────────┐    │
-    │  │ VectorStore::save_chunks()     │    │
-    │  │ → Qdrant upsert_points          │    │
-    │  │ Payload: content, source_path, │    │
-    │  │ file_name, pvc_name, file_size, │    │
-    │  │ dates, file_hash, folder_tags  │    │
-    │  └─────────────────────────────────┘    │
-    └─────────────────────────────────────────┘
-              │
-              ▼
-         PipelineRun UPDATE
-         status: "COMPLETED" ou "FAILED"
+                    IndexingUseCase::execute(path)
+                              │
+                              ▼
+                   scan_directory(path)
+                   ┌─────────────────────────┐
+                   │ walkdir récursif        │
+                   │ Extensions: pdf, md,    │
+                   │ txt, log                │
+                   └───────────┬─────────────┘
+                              │ Vec<file_paths>
+                              ▼
+             futures::stream::iter(file_paths)
+             .buffer_unordered(8)     ← Concurrence = 8
+                              │
+             ┌────────────────┼────────────────┐
+             ▼                ▼                ▼
+        process_file()   process_file()   process_file()
+             │                │                │
+             ▼                ▼                ▼
+        PipelineRun CREATE / UPDATE (PostgreSQL)
+        status: "IN_PROGRESS"
+             │
+             ▼
+   ┌────────────────────────────────────────────────────┐
+   │              process_file_internal()               │
+   │                                                    │
+   │  Étape 1: PARSING                                  │
+   │  ┌────────────────────────────────────────────┐   │
+   │  │ load_document(file_path)                   │   │
+   │  │ - SHA256 hash (déduplication)              │   │
+   │  │ - PDF: pdf_oxide spawn_blocking (30s max)  │   │
+   │  │        [OCR PENDING] si vide               │   │
+   │  │        [ERROR] si échec                    │   │
+   │  │        [TIMEOUT] si >30s                   │   │
+   │  │ - Autres: UTF-8 read                       │   │
+   │  │ - Métadonnées: size, dates, folder_tags,   │   │
+   │  │   pvc_name, inferred_tags=None, etc.       │   │
+   │  │ - OCR status: SUCCESS/FAILED/NONE          │   │
+   │  └───────────────────┬────────────────────────┘   │
+   │                      ▼                            │
+   │  Étape 2: ENRICHISSEMENT LLM (NOUVEAU)            │
+   │  ┌────────────────────────────────────────────┐   │
+   │  │ Contenu tronqué à 10000 caractères max     │   │
+   │  │                                            │   │
+   │  │ 2a. RÉSUMÉ CONTEXTUEL                      │   │
+   │  │ ┌──────────────────────────────────────┐   │   │
+   │  │ │ System: "You are a precise context   │   │   │
+   │  │ │          summarizer."                │   │   │
+   │  │ │ User: "Provide 1-2 sentence summary  │   │   │
+   │  │ │        of this document..."          │   │   │
+   │  │ │ LLM → doc_context (summary string)   │   │   │
+   │  │ └──────────────────────────────────────┘   │   │
+   │  │                                            │   │
+   │  │ 2b. MÉTADONNÉES STRUCTURÉES                │   │
+   │  │ ┌──────────────────────────────────────┐   │   │
+   │  │ │ System: "You are a metadata          │   │   │
+   │  │ │          extractor. Output ONLY JSON" │   │   │
+   │  │ │ User: "Extract: inferred_tags (list),│   │   │
+   │  │ │        document_summary (3 sentences)│   │   │
+   │  │ │        detected_entities (list)"     │   │   │
+   │  │ │ LLM → Parsed JSON → stocké dans     │   │   │
+   │  │ │        doc.metadata.*                │   │   │
+   │  │ │ Fallback: nettoie ```json / ```      │   │   │
+   │  │ └──────────────────────────────────────┘   │   │
+   │  └───────────────────┬────────────────────────┘   │
+   │                      ▼                            │
+   │  Étape 3: CHUNKING                                │
+   │  ┌────────────────────────────────────────────┐   │
+   │  │ split_text(content, chunk_size,            │   │
+   │  │              chunk_overlap)                │   │
+   │  │ Séparateurs: \n\n → \n → " " → ""         │   │
+   │  │                                            │   │
+   │  │ ENRICHISSEMENT CONTEXTUEL DES CHUNKS       │   │
+   │  │ enrichi = format!(                          │   │
+   │  │   "Document: {name}\n                      │   │
+   │  │    Context: {summary}\n                    │   │
+   │  │    Chunk Content: {chunk}")                │   │
+   │  │                                            │   │
+   │  │ Les chunks enrichis remplacent les chunks  │   │
+   │  │ bruts pour l'embedding et le stockage      │   │
+   │  │                                            │   │
+   │  │ Valeurs par défaut :                       │   │
+   │  │   chunk_size = 1000, chunk_overlap = 0     │   │
+   │  └───────────────────┬────────────────────────┘   │
+   │                      ▼                            │
+   │  Étape 4: EMBEDDING                               │
+   │  ┌────────────────────────────────────────────┐   │
+   │  │ Par batch de 32 chunks enrichis            │   │
+   │  │ EmbeddingService::generate_embeddings()    │   │
+   │  │  → TEI (POST /embed)                       │   │
+   │  │  → ou LiteLLM (POST /v1/embeddings)        │   │
+   │  └───────────────────┬────────────────────────┘   │
+   │                      ▼                            │
+   │  Étape 5: STORING                                 │
+   │  ┌────────────────────────────────────────────┐   │
+   │  │ VectorStore::save_chunks(chunks, collection)│   │
+   │  │ → Qdrant upsert_points                      │   │
+   │  │                                              │   │
+   │  │ Payload stocké :                             │   │
+   │  │ - content (texte enrichi)                    │   │
+   │  │ - source_path, file_name, pvc_name           │   │
+   │  │ - file_size, last_modified, creation_date    │   │
+   │  │ - file_hash (SHA256)                         │   │
+   │  │ - folder_tags (hiérarchiques)                │   │
+   │  │ - inferred_tags (list, du LLM)               │   │
+   │  │ - document_summary (string, du LLM)          │   │
+   │  │ - detected_entities (list, du LLM)           │   │
+   │  └─────────────────────────────────────────────┘   │
+   └────────────────────────────────────────────────────┘
+             │
+             ▼
+        PipelineRun UPDATE
+        status: "COMPLETED" ou "FAILED"
 ```
 
 ### Détail du Text Splitter (`split_text`)
@@ -243,18 +293,20 @@ main()
 ```
 Fonction split_recursive(text, séparateurs, chunk_size, chunk_overlap)
 
+  Hiérarchie des séparateurs :
+    niveau 0: "\n\n" (paragraphes)
+    niveau 1: "\n"   (lignes)
+    niveau 2: " "    (mots)
+    niveau 3: ""     (caractères — fallback)
+
+  Algorithme :
   1. Si text ≤ chunk_size → ajouter aux chunks, return
-  2. Sinon:
-     a. Prendre le séparateur courant (hiérarchie: \n\n → \n → " " → "")
-     b. Fractionner le texte par ce séparateur
-     c. Grouper les fragments jusqu'à atteindre chunk_size
-     d. Quand un fragment dépasse:
-        - Sauvegarder le groupe actuel comme chunk
-        - Calculer l'overlap en prenant les derniers fragments
-        - Continuer avec le fragment restant
-     e. Si un fragment seul dépasse chunk_size:
-        - Récursion avec le séparateur suivant
-  3. Ajouter le dernier groupe s'il n'est pas vide
+  2. Prendre le séparateur courant
+  3. Splitter le texte par ce séparateur
+  4. Grouper les fragments jusqu'à chunk_size
+  5. Quand un fragment dépasse → sauvegarder le groupe,
+     appliquer l'overlap (reprendre derniers N fragments),
+     récursion avec séparateur suivant si nécessaire
 ```
 
 ---
@@ -269,51 +321,59 @@ Fonction split_recursive(text, séparateurs, chunk_size, chunk_overlap)
                     │
                     ▼
      Étape 1: EMBEDDING DE LA REQUÊTE
-     ┌─────────────────────────────────┐
-     │ generate_embeddings([query])   │
-     │ → TEI / LiteLLM                 │
-     └──────────────┬──────────────────┘
+     ┌────────────────────────────────────┐
+     │ generate_embeddings([query])      │
+     │ → TEI (POST /embed)               │
+     │ → ou LiteLLM (POST /v1/embeddings)│
+     └──────────────┬─────────────────────┘
                     ▼
      Étape 2: RECHERCHE VECTORIELLE
-     ┌─────────────────────────────────┐
-     │ VectorStore::search()          │
-     │ → Qdrant query_points          │
-     │ → Limite: 50 résultats         │
-     │ → Similarité cosinus           │
-     └──────────────┬──────────────────┘
+     ┌────────────────────────────────────┐
+     │ VectorStore::search()             │
+     │ → Qdrant query_points             │
+     │   .query(query_vector)            │
+     │   .limit(50)                      │
+     │   .with_payload(true)             │
+     │ → Similarité cosinus              │
+     │ → Retourne 50 candidats           │
+     └──────────────┬─────────────────────┘
                     ▼
      Étape 3: RERANKING
-     ┌─────────────────────────────────┐
-     │ RerankingService::rerank()     │
-     │ → TEI (POST /rerank)           │
-     │ → Tri par score descendant     │
-     │ → Top 5 résultats              │
-     └──────────────┬──────────────────┘
+     ┌────────────────────────────────────┐
+     │ RerankingService::rerank()        │
+     │ → TEI (POST /rerank)              │
+     │   query + 50 textes               │
+     │ → Tri par score descendant        │
+     │ → Garde top 5                     │
+     │ → Retourne DocumentChunk[]        │
+     └──────────────┬─────────────────────┘
                     ▼
-          Réponse: Vec<DocumentChunk>
+          Réponse JSON: results[]
+          { content, source, score }
 ```
 
 ---
 
 ## 6. Configuration
 
-Toutes les variables peuvent être définies via variables d'environnement ou arguments CLI (clap).
+Variables d'environnement (12-Factor App) — toutes surchargeables en CLI via clap :
 
 | Variable | CLI | Défaut | Description |
 |----------|-----|--------|-------------|
 | `DATABASE_URL` | `--database-url` | **Requis** | Connexion PostgreSQL |
-| `QDRANT_URL` | `--qdrant-url` | `http://qdrant.qdrant.svc.cluster.local:6333` | URL du cluster Qdrant |
-| `NFS_PATH` | `--paths` | `/data/nfs` | Chemins à indexer (séparés par des virgules) |
-| `COLLECTION_NAME` | `--collection-name` | `mnemosyne_docs` | Nom de la collection Qdrant |
-| `EMBEDDING_MODEL` | `--embedding-model` | `BAAI/bge-m3` | Modèle d'embedding (métadonnée) |
-| `TEI_EMBEDDER_URL` | `--tei-embedder-url` | Service K8s TEI embedder | URL du service TEI embedding |
-| `TEI_RERANKER_URL` | `--tei-reranker-url` | Service K8s TEI reranker | URL du service TEI reranking |
-| `PYLOS_URL` / `LITELLM_URL` | `--pylos-url` | `None` | URL alternative LiteLLM |
+| `QDRANT_URL` | `--qdrant-url` | `http://qdrant.qdrant.svc.cluster.local:6333` | URL cluster Qdrant |
+| `NFS_PATH` | `--paths` | `/data/nfs` | Chemins à indexer (séparés par `,`) |
+| `COLLECTION_NAME` | `--collection-name` | `mnemosyne_docs` | Nom collection Qdrant |
+| `EMBEDDING_MODEL` | `--embedding-model` | `BAAI/bge-m3` | Modèle embedding (métadonnée) |
+| `TEI_EMBEDDER_URL` | `--tei-embedder-url` | Service K8s mnemosyne-tei-embedder | URL TEI embedding |
+| `TEI_RERANKER_URL` | `--tei-reranker-url` | Service K8s mnemosyne-tei-reranker | URL TEI reranking |
+| `PYLOS_URL` / `LITELLM_URL` | `--pylos-url` | `None` | URL LiteLLM (embeddings + LLM) |
 | `PYLOS_API_KEY` / `LITELLM_API_KEY` | `--pylos-api-key` | `None` | Clé API LiteLLM |
-| `PVC_NAME` | `--pvc-name` | `unknown` | Identifiant du volume PVC |
-| `HTTP_PORT` | `--http-port` | `8080` | Port du serveur HTTP |
+| `LLM_MODEL` | — | `gemini-3-flash` | Modèle LLM pour enrichissement (résumé, tags, entités) |
+| `PVC_NAME` | `--pvc-name` | `unknown` | Identifiant PVC pour métadonnées |
+| `HTTP_PORT` | `--http-port` | `8080` | Port serveur HTTP |
 | `ONESHOT` | `--oneshot` | `false` | Sortir après indexation (mode CronJob) |
-| `RUST_LOG` | — | `info` | Niveau de log (tracing) |
+| `RUST_LOG` | — | `info` | Niveau de log tracing |
 
 ---
 
@@ -325,7 +385,7 @@ Toutes les variables peuvent être définies via variables d'environnement ou ar
 GET /health
 ```
 
-Réponse :
+Réponse (200) :
 ```json
 {
   "status": "ok",
@@ -343,25 +403,12 @@ Réponse :
 POST /api/auth/login
 Content-Type: application/json
 
-{
-  "username": "admin",
-  "password": "password"
-}
+{ "username": "admin", "password": "password" }
 ```
 
 Réponse (200) :
 ```json
-{
-  "token": "dummy-jwt-token",
-  "username": "admin"
-}
-```
-
-Réponse (401) :
-```json
-{
-  "error": "Invalid password"
-}
+{ "token": "dummy-jwt-token", "username": "admin" }
 ```
 
 ### 7.3 Recherche
@@ -370,9 +417,7 @@ Réponse (401) :
 POST /api/search
 Content-Type: application/json
 
-{
-  "query": "Qu'est-ce que la mémoire ?"
-}
+{ "query": "Qu'est-ce que la mémoire ?" }
 ```
 
 Réponse (200) :
@@ -380,33 +425,37 @@ Réponse (200) :
 {
   "results": [
     {
-      "content": "Le chunk de document pertinent...",
-      "source": "document.pdf",
+      "content": "Document: doc.pdf\nContext: Ce document traite de...\nChunk Content: ...",
+      "source": "doc.pdf",
       "score": 0.95
     }
   ]
 }
 ```
 
-### 7.4 Pipeline Runs (Monitoring)
+**Note** : Le `content` retourné inclut le préfixe contextuel (`Document: ... Context: ... Chunk Content: ...`) généré lors de l'indexation enrichie.
+
+### 7.4 Pipeline Runs — Monitoring
 
 ```
 GET /api/pipeline/runs
 ```
 
-Réponse : tableau de `PipelineRun` trié par `started_at` DESC.
+Retourne le tableau des `PipelineRun` trié par `started_at` DESC.
 
 ```
 GET /api/pipeline/runs/:id
 ```
 
-Réponse : `PipelineRun` unique.
+Retourne une `PipelineRun` unique.
 
-### 7.5 Statistiques d'Indexation
+### 7.5 Métriques Globales
 
 ```
 GET /api/indexing/stats
 ```
+
+Point d'entrée unique pour toutes les métriques : indexation, base vectorielle et utilisation.
 
 Réponse (200) :
 ```json
@@ -426,6 +475,18 @@ Réponse (200) :
     "indexed_vectors_count": 2840,
     "segments_count": 3,
     "status": "Green"
+  },
+  "usage": {
+    "total_searches": 1250,
+    "searches_today": 42,
+    "searches_this_week": 310,
+    "average_duration_ms": 185.5,
+    "total_results_returned": 5230,
+    "zero_result_searches": 15,
+    "top_queries": [
+      { "query": "rapport financier 2024", "count": 28 },
+      { "query": "procédure sécurité", "count": 22 }
+    ]
   }
 }
 ```
@@ -446,10 +507,10 @@ Content-Type: application/json
 
 Réponse (202) :
 ```json
-{
-  "status": "re-indexing queued"
-}
+{ "status": "re-indexing queued" }
 ```
+
+La ré-indexation s'exécute en arrière-plan via `tokio::spawn`.
 
 ---
 
@@ -460,45 +521,66 @@ Réponse (202) :
 #### Migration `001_init.sql` — Tables principales
 
 ```sql
--- Extensions vectorielles (pgvector / vectorscale)
+-- Extensions vectorielles
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
 
--- Compatibilité LangChain
-langchain_pg_collection (name, cmetadata, uuid)
-langchain_pg_embedding  (collection_id, embedding, document, cmetadata, custom_id, uuid)
+-- Compatibilité LangChain (legacy)
+langchain_pg_collection (name VARCHAR, cmetadata JSONB, uuid UUID PRIMARY KEY)
+langchain_pg_embedding  (collection_id UUID, embedding VECTOR(1536),
+                         document VARCHAR, cmetadata JSONB,
+                         custom_id VARCHAR, uuid UUID PRIMARY KEY)
 
 -- Utilisateurs
-users (id, username, password_hash, email, created_at)
+users (id UUID PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL,
+       password_hash VARCHAR(255) NOT NULL, email VARCHAR(255) UNIQUE NOT NULL,
+       created_at TIMESTAMPTZ DEFAULT NOW())
 
 -- Audit logs
-audit_logs (id, user_id, action, resource, timestamp, metadata)
+audit_logs (id UUID PRIMARY KEY, user_id UUID REFERENCES users(id),
+            action VARCHAR(255), resource VARCHAR(255),
+            timestamp TIMESTAMPTZ DEFAULT NOW(), metadata JSONB)
 ```
 
 #### Migration `002_observability.sql` — Monitoring
 
 ```sql
 pipeline_runs (
-    id            UUID PRIMARY KEY,
-    file_path     VARCHAR(1024) NOT NULL,
-    file_name     VARCHAR(255) NOT NULL,
-    file_size     BIGINT NOT NULL,
-    status        VARCHAR(50) NOT NULL,  -- IN_PROGRESS / COMPLETED / FAILED
-    current_step  VARCHAR(50) NOT NULL,  -- PARSING / CHUNKING / EMBEDDING / STORING / COMPLETE
-    ocr_status    VARCHAR(50) NOT NULL,  -- NONE / SUCCESS / FAILED
-    error_message TEXT,
-    chunks_count  INT,
+    id             UUID PRIMARY KEY,
+    file_path      VARCHAR(1024) NOT NULL,
+    file_name      VARCHAR(255) NOT NULL,
+    file_size      BIGINT NOT NULL,
+    status         VARCHAR(50) NOT NULL,   -- IN_PROGRESS / COMPLETED / FAILED
+    current_step   VARCHAR(50) NOT NULL,   -- PARSING / CHUNKING / EMBEDDING / STORING / COMPLETE
+    ocr_status     VARCHAR(50) NOT NULL,   -- NONE / SUCCESS / FAILED
+    error_message  TEXT,
+    chunks_count   INT,
     extracted_text TEXT,
-    chunks        JSONB,
-    started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at  TIMESTAMPTZ,
-    parameters    JSONB                   -- { chunk_size, chunk_overlap }
+    chunks         JSONB,                  -- Liste des chunks bruts
+    started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at   TIMESTAMPTZ,
+    parameters     JSONB                   -- { chunk_size, chunk_overlap }
 )
 ```
 
+#### Migration `003_usage_stats.sql` — Statistiques d'utilisation
+
+```sql
+search_logs (
+    id                 UUID PRIMARY KEY,
+    query              TEXT NOT NULL,          -- Texte de la requête
+    results_count      INT NOT NULL DEFAULT 0, -- Nombre de résultats retournés
+    search_duration_ms INT NOT NULL DEFAULT 0, -- Temps d'exécution en ms
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    INDEX idx_search_logs_created_at ON (created_at)
+)
+```
+
+Chaque appel à `POST /api/search` enregistre automatiquement la requête, son temps d'exécution et le nombre de résultats dans cette table.
+
 ### 8.2 Collection Qdrant
 
-Configuration de la collection par défaut `mnemosyne_docs` :
+Configuration de la collection `mnemosyne_docs` (créée automatiquement si inexistante) :
 
 | Paramètre | Valeur |
 |-----------|--------|
@@ -508,18 +590,22 @@ Configuration de la collection par défaut `mnemosyne_docs` :
 | Stockage payload | On-disk |
 | Index plein texte | Sur le champ `content` |
 
-Payload des points :
-```
+Payload des points — métadonnées complètes enrichies :
+
+```json
 {
-  "content":        "texte du chunk",
-  "source_path":    "/data/nfs/doc.pdf",
-  "file_name":      "doc.pdf",
-  "pvc_name":       "nfs-data",
-  "file_size":      123456,
-  "last_modified":  1700000000,
-  "creation_date":  1700000000,
-  "file_hash":      "sha256hex",
-  "folder_tags":    ["data", "nfs", "rapports"]
+  "content":           "Document: doc.pdf\nContext: Ce document...\nChunk Content: ...",
+  "source_path":       "/data/nfs/rapports/doc.pdf",
+  "file_name":         "doc.pdf",
+  "pvc_name":          "nfs-data",
+  "file_size":         123456,
+  "last_modified":     1700000000,
+  "creation_date":     1700000000,
+  "file_hash":         "abc123def456...",
+  "folder_tags":       ["data", "nfs", "rapports"],
+  "inferred_tags":     ["finance", "report", "Q4"],
+  "document_summary":  "Ce rapport présente les résultats financiers du Q4...",
+  "detected_entities": ["SARL Exemple", "Jean Dupont", "2024"]
 }
 ```
 
@@ -533,17 +619,17 @@ L'interface web se trouve dans `ui/` et est servie par un conteneur nginx sépar
 
 | Fonction | Description |
 |----------|-------------|
-| **Recherche** | Barre de recherche avec résultats enrichis (score, source) |
-| **Synthèse AI** | Bouton flottant pour générer une réponse via Ollama |
-| **Pipeline Monitor** | Tableau des runs d'indexation avec statuts, étapes, OCR |
-| **Détail d'une run** | Panneau latéral avec métadonnées, timeline, texte extrait, chunks |
+| **Recherche** | Barre de recherche avec résultats enrichis (score %, source) |
+| **Synthèse AI** | Bouton flottant → interroge Ollama avec les résultats comme contexte |
+| **Pipeline Monitor** | Tableau des runs d'indexation (statuts, étapes, OCR, chunks) |
+| **Détail d'une run** | Panneau latéral : métadonnées, timeline visuelle (5 étapes), texte extrait, chunks |
 | **Correction** | Ré-indexation avec chunk_size/overlap personnalisés ou texte corrigé |
-| **Paramètres** | Configuration de l'URL API Mnemosyne, Ollama, modèle |
+| **Paramètres** | Configuration URL API Mnemosyne, Ollama URL, modèle |
 
 ### Stack UI
 - **HTML** : Page unique avec onglets (Search / Pipeline Monitor)
-- **CSS** : Thème dark mode, verre morphism, dégradés violet/bleu, animations
-- **JS** : Appels API fetch, gestion d'état localStorage, streaming Ollama
+- **CSS** : Thème dark, glass-morphism, dégradés violet/bleu, animations
+- **JS** : Appels fetch REST, streaming Ollama, localStorage, state management
 
 ---
 
@@ -551,7 +637,7 @@ L'interface web se trouve dans `ui/` et est servie par un conteneur nginx sépar
 
 ### 10.1 Kubernetes (Production)
 
-Deux modes de fonctionnement, configurables via Helm (`deploy/helm/mnemosyne/values.yaml`) :
+Deux modes mutuellement exclusifs via Helm (`deploy/helm/mnemosyne/values.yaml`) :
 
 #### Mode Service Continu (Deployment)
 
@@ -561,74 +647,79 @@ deployment:
   replicaCount: 1
 ```
 
-- Démarre, indexe tous les chemins configurés
-- Reste actif pour servir l'API REST
+- Démarre → indexe tous les chemins → reste actif pour servir l'API REST
 - Utilisé pour les environnements nécessitant une disponibilité permanente
 
 #### Mode Indexation Planifiée (CronJob)
 
 ```yaml
 cronjob:
-  enabled: false  # true pour activer
-  schedule: "0 2 * * *"  # Tous les jours à 2h
+  enabled: true
+  schedule: "0 2 * * *"   # Tous les jours à 2h du matin
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 1
 ```
 
-- Utilise `ONESHOT=true` → indexe puis s'arrête
+- `ONESHOT=true` → indexe puis s'arrête
 - Monte le PVC NFS en read-only
-- Utilise les secrets Vault pour les credentials
+- Secrets via Vault External Secrets Operator
 
 ### 10.2 Architecture K8s
 
 ```
-                    ┌─────────────┐
-                    │   Ingress   │
-                    └──────┬──────┘
+                    ┌──────────────┐
+                    │   Ingress    │
+                    └──────┬───────┘
                            │
               ┌────────────┴────────────┐
               │                         │
-        ┌─────▼──────┐          ┌──────▼─────┐
-        │  Mnemosyne │          │   Nginx    │
-        │  (Service) │          │   (UI)     │
-        │  :8080     │          │   :8080    │
-        └─────┬──────┘          └──────┬─────┘
+        ┌─────▼──────┐          ┌──────▼──────┐
+        │  Mnemosyne │          │   Nginx     │
+        │  (Service) │          │   (UI)      │
+        │  :8080     │          │   :8080     │
+        └─────┬──────┘          └──────┬──────┘
               │                        │
-              ▼                        ▼
-        ┌──────────┐           ┌──────────────┐
-        │ Qdrant   │           │  PostgreSQL  │
-        │ :6333    │           │  :5432       │
-        └──────────┘           └──────────────┘
+              ▼                        │
+        ┌──────────┐                   │
+        │ Qdrant   │                   │
+        │ :6333    │                   │
+        └──────────┘                   │
+                                       │
+        ┌──────────────┐               │
+        │  PostgreSQL  │◄──────────────┘
+        │  :5432       │
+        └──────────────┘
 
-        ┌──────────┐
-        │ TEI      │
-        │ Embedder │
-        └──────────┘
+        ┌──────────────────┐     ┌──────────────────┐
+        │ TEI Embedder     │     │ TEI Reranker     │
+        │ (BAAI/bge-m3)    │     │ (BGE-reranker-v2)│
+        └──────────────────┘     └──────────────────┘
 
-        ┌──────────┐
-        │ TEI      │
-        │ Reranker │
-        └──────────┘
+        ┌──────────────────────────────────┐
+        │ LiteLLM (proxy OpenAI-compat)    │
+        │ → embeddings + LLM text gen     │
+        └──────────────────────────────────┘
 ```
 
 ### 10.3 Dépendances Externes
 
-| Service | Version | Description |
-|---------|---------|-------------|
-| Qdrant | ≥ 1.17 | Base vectorielle |
-| PostgreSQL | ≥ 14 | Métadonnées, comptes, monitoring |
-| TEI Embedder | — | HuggingFace Text Embeddings Inference (embedding) |
-| TEI Reranker | — | HuggingFace TEI (reranking) |
-| LiteLLM (optionnel) | — | Alternative d'embedding (compatible OpenAI) |
+| Service | Rôle | Version |
+|---------|------|---------|
+| **Qdrant** | Base vectorielle | ≥ 1.17 |
+| **PostgreSQL** | Métadonnées, comptes, monitoring | ≥ 14 |
+| **TEI Embedder** | Embedding (BAAI/bge-m3) | — |
+| **TEI Reranker** | Reranking (BGE-reranker-v2-m3) | — |
+| **LiteLLM** | Proxy LLM (embedding + text gen) | — |
 
-### 10.4 Vault
-
-Les secrets sont gérés via **External Secrets Operator** avec Vault comme backend :
+### 10.4 Vault (Secrets)
 
 ```bash
 ./scripts/setup_vault.sh
-# Stoque DATABASE_URL et LITELLM_API_KEY dans Vault
+# Stoque DATABASE_URL et LITELLM_API_KEY
+# Chemin Vault : ai/mnemosyne
+# Sync via External Secrets Operator
 ```
-
-Chemin Vault : `ai/mnemosyne`
 
 ---
 
@@ -637,22 +728,22 @@ Chemin Vault : `ai/mnemosyne`
 ### 11.1 Prérequis
 
 - Rust 1.80+
-- Tesseract OCR (headers dev) : `libtesseract-dev`, `libleptonica-dev`
-- PostgreSQL accessible
-- Cluster Qdrant (ou Docker local)
-- Service TEI (ou LiteLLM)
+- Tesseract OCR headers : `libtesseract-dev`, `libleptonica-dev`, `clang`, `pkg-config`
+- PostgreSQL
+- Qdrant (Docker ou cluster)
+- TEI Embedder + Reranker (ou LiteLLM)
 
 ### 11.2 Commandes
 
 ```bash
-# Build
+# Build release
 cargo build --release
 
 # Lancer (indexation + serveur)
-cargo run -- --paths /data/documents --database-url postgres://...
+cargo run -- --paths /data/docs --database-url postgres://user:pass@localhost/mnemosyne
 
 # Mode oneshot (CronJob)
-cargo run -- --paths /data/documents --database-url postgres://... --oneshot
+cargo run -- --paths /data/docs --database-url postgres://... --oneshot
 
 # Créer l'utilisateur admin
 cargo run --bin seed
@@ -660,9 +751,11 @@ cargo run --bin seed
 # Tests
 cargo test
 
+# CI locale complète
+bash local-ci.sh
+
 # Linting
-make lint          # = cargo fmt --check + cargo clippy -- -D warnings
-bash local-ci.sh   # CI complète (fmt → clippy → test → build)
+make lint
 
 # Docker
 make docker-build
@@ -672,59 +765,67 @@ make docker-build
 
 ```
 mnemosyne/
-├── Cargo.toml                    # Manifest Rust
-├── Makefile                      # Commandes make
-├── Dockerfile                    # Build Docker mnemosyne
-├── Dockerfile.ui                 # Build Docker UI (nginx)
-├── local-ci.sh                   # CI locale
-├── .github/workflows/ci.yml      # CI/CD GitHub Actions
+├── Cargo.toml                        # Manifest Rust, 2 bins
+├── Makefile                          # build, run, test, lint, docker
+├── Dockerfile                        # Multi-stage (cargo-chef)
+├── Dockerfile.ui                     # nginx pour UI
+├── local-ci.sh                       # fmt → clippy → test → build
+├── DOCUMENTATION.md                  # Ce fichier
+├── README.md                         # Présentation rapide
+├── .github/workflows/ci.yml          # GitHub Actions CI/CD
+│
 ├── src/
-│   ├── main.rs                   # Point d'entrée, CLI, routes
-│   ├── lib.rs                    # AppState, modules
-│   ├── bin/seed.rs               # Utilitaire création admin
+│   ├── main.rs                       # CLI (clap), startup, routes
+│   ├── lib.rs                        # AppState, module declarations
+│   ├── bin/seed.rs                   # Seed admin user
+│   │
 │   ├── domain/
-│   │   ├── entities.rs           # Entités du domaine
-│   │   └── ports.rs              # Traits (interfaces)
-│   ├── application/
-│   │   └── use_cases/
-│   │       ├── indexing.rs       # Pipeline d'indexation
-│   │       ├── retrieval.rs      # Pipeline de recherche
-│   │       └── auth.rs           # Authentification
+│   │   ├── entities.rs               # Document, Metadata, Chunk, User, PipelineRun
+│   │   └── ports.rs                  # Traits VectorStore, LLMService, etc.
+│   │
+│   ├── application/use_cases/
+│   │   ├── indexing.rs               # Pipeline complet (LLM enrich)
+│   │   ├── retrieval.rs              # Search + rerank
+│   │   └── auth.rs                   # Login + audit
+│   │
 │   ├── infrastructure/
 │   │   ├── repositories/
-│   │   │   ├── file_scanner.rs   # Scan disque + extraction
-│   │   │   ├── qdrant.rs         # Adaptateur Qdrant
-│   │   │   ├── postgres_account.rs # Comptes + monitoring
-│   │   │   └── postgres_vector.rs # Legacy pgvector
+│   │   │   ├── file_scanner.rs       # WalkDir + pdf_oxide + SHA256
+│   │   │   ├── qdrant.rs             # Qdrant upsert/search/info
+│   │   │   ├── postgres_account.rs   # User + Audit + Pipeline + Stats
+│   │   │   └── postgres_vector.rs    # Legacy pgvector
 │   │   └── embedding/
-│   │       ├── tei.rs            # TEI (embed + rerank)
-│   │       └── litellm.rs        # LiteLLM (embed)
-│   └── interfaces/
-│       └── http/
-│           ├── auth_handlers.rs
-│           ├── query_handlers.rs
-│           └── pipeline_handlers.rs
+│   │       ├── tei.rs                # TEI embed + rerank
+│   │       └── litellm.rs            # LiteLLM embed + LLM text gen
+│   │
+│   └── interfaces/http/
+│       ├── auth_handlers.rs
+│       ├── query_handlers.rs
+│       └── pipeline_handlers.rs      # Runs + Stats + Retry
+│
 ├── migrations/
-│   ├── 001_init.sql              # Schéma initial
-│   └── 002_observability.sql     # Table pipeline_runs
+│   ├── 001_init.sql                  # pgvector, users, audit_logs
+│   └── 002_observability.sql         # pipeline_runs
+│
 ├── ui/
-│   ├── index.html                # Interface web
-│   ├── style.css                 # Styles dark mode
-│   └── script.js                 # Logique front-end
-├── deploy/
-│   └── helm/mnemosyne/
-│       └── values.yaml           # Helm chart values
+│   ├── index.html                    # SPA : Search + Pipeline Monitor
+│   ├── style.css                     # Dark theme, glassmorphism
+│   └── script.js                     # Fetch, Ollama, state
+│
+├── deploy/helm/mnemosyne/
+│   └── values.yaml                   # Helm chart
+│
 ├── kubernetes/
-│   ├── cronjob.yaml              # CronJob K8s
-│   └── check-index-job.yaml      # Job d'audit K8s
+│   ├── cronjob.yaml                  # CronJob indexation nightly
+│   └── check-index-job.yaml          # Job audit fichiers non indexés
+│
 ├── scripts/
-│   ├── check_non_indexed.py      # Audit fichiers non indexés
-│   └── setup_vault.sh            # Configuration Vault
-└── python-version/               # Version Python legacy
-    ├── indexer.py
-    ├── setup_db.py
-    ├── Dockerfile
-    ├── Makefile
+│   ├── check_non_indexed.py          # Audit Python
+│   └── setup_vault.sh               # Configuration Vault
+│
+└── python-version/                   # Version Python legacy
+    ├── indexer.py, setup_db.py
+    ├── Dockerfile, Makefile
     └── requirements.txt
 ```
 
@@ -734,36 +835,30 @@ mnemosyne/
 
 ### 12.1 Tests Unitaires
 
-| Module | Fichier | Tests |
-|--------|---------|-------|
-| `indexing` | `src/application/use_cases/indexing.rs` | 3 tests sur `split_text` |
-| `retrieval` | `src/application/use_cases/retrieval.rs` | 1 test sur le pipeline complet |
-| `auth` | `src/application/use_cases/auth.rs` | 2 tests (login success/failure) |
+| Module | Fichier | Tests | Description |
+|--------|---------|-------|-------------|
+| `indexing` | `indexing.rs` | 3 | `split_text` : simple, paragraphes, boundaries |
+| `retrieval` | `retrieval.rs` | 1 | Pipeline complet mocké (embed → search → rerank) |
+| `auth` | `auth.rs` | 2 | Login success + invalid password |
 
-Les tests utilisent `mockall` pour simuler les dépendances asynchrones.
+Framework de mock : **mockall** (génération automatique de mocks async).
 
 ### 12.2 Exécution
 
 ```bash
-# Tous les tests
-cargo test
-
-# Test spécifique
-cargo test test_retrieval_pipeline
-
-# Avec output
-cargo test -- --nocapture
+cargo test                          # Tous
+cargo test test_retrieval_pipeline  # Un seul
+cargo test -- --nocapture           # Avec stdout
 ```
 
 ### 12.3 Audit d'Indexation
 
-Un script Python (`scripts/check_non_indexed.py`) compare les fichiers indexés dans Qdrant avec le système de fichiers local :
+Script Python (`scripts/check_non_indexed.py`) ou Job K8s (`kubernetes/check-index-job.yaml`) :
 
 ```bash
 python3 scripts/check_non_indexed.py
+# Compare Qdrant (source_path) vs filesystem → liste les non indexés
 ```
-
-Un job Kubernetes (`kubernetes/check-index-job.yaml`) effectue la même vérification dans le cluster.
 
 ---
 
@@ -771,26 +866,35 @@ Un job Kubernetes (`kubernetes/check-index-job.yaml`) effectue la même vérific
 
 ### GitHub Actions (`.github/workflows/ci.yml`)
 
-| Job | Description |
-|-----|-------------|
-| `security` | Scan Gitleaks pour détection de secrets |
-| `lint-and-format` | `cargo fmt` + `cargo clippy` avec auto-commit des corrections |
-| `build-and-push` | Build Docker multi-stage + push vers `ghcr.io` |
-
-Déclencheurs :
-- `push` sur `main`
-- `pull_request` sur `main`
-
-Tags Docker : `sha-<commit>`, `<branchname>`, `latest`.
+```yaml
+# Déclencheurs : push/PR sur main
+jobs:
+  security:           # Gitleaks (scan de secrets)
+  lint-and-format:    # cargo fmt + clippy → auto-commit
+  build-and-push:     # Docker buildx → push ghcr.io
+                       # Tags : sha-<commit>, branche, latest
+```
 
 ### CI Locale (`local-ci.sh`)
 
 ```bash
 ./local-ci.sh
-# 1. cargo fmt --check
-# 2. cargo clippy -- -D warnings
-# 3. cargo test
-# 4. cargo build
+# [1/4] cargo fmt --all --check
+# [2/4] cargo clippy -- -D warnings
+# [3/4] cargo test
+# [4/4] cargo build
+```
+
+### Makefile
+
+```makefile
+build           cargo build --release
+run             cargo run
+seed            cargo run --bin seed
+test            cargo test
+lint            cargo fmt --check + cargo clippy -- -D warnings
+docker-build    docker build -t mnemosyne:latest .
+clean           cargo clean
 ```
 
 ---
@@ -799,88 +903,102 @@ Tags Docker : `sha-<commit>`, `<branchname>`, `latest`.
 
 | Mesure | Détail |
 |--------|--------|
-| **Non-root** | Le conteneur Docker exécute avec l'utilisateur `mnemosyne` (UID 1000) |
-| **Pod Security Context** | `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, drop de toutes les capacités |
-| **Secrets** | Gestion via Vault + External Secrets Operator (pas de secrets en dur) |
-| **Logs sensibles** | Aucun secret dans les logs (tracing structuré) |
-| **CORS** | Configuration permissive en développement (à restreindre en production) |
-| **Auth** | Authentification basique (à renforcer avec JWT valide en production) |
+| **Non-root** | Conteneur exécute avec user `mnemosyne` (UID 1000) |
+| **Pod Security** | `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, drop ALL capabilities |
+| **Secrets** | External Secrets Operator + Vault |
+| **Logs** | Aucun secret dans les logs (tracing structuré vers stderr) |
+| **CORS** | `AllowOrigin(Any)` — à restreindre en production |
+| **Auth API** | Token JWT (actuellement placeholder `dummy-jwt-token`) |
+| **PDF timeout** | 30s max avec `spawn_blocking` pour éviter le blocage Tokio |
+| **LLM fallback** | Parsing JSON avec fallback pour les réponses LLM non conformes |
 
 ---
 
 ## 15. Déploiement Legacy Python
 
-Une version Python de l'indexeur est préservée dans `python-version/` :
-
-```
-python-version/
-├── indexer.py         # Indexeur LangChain + LiteLLM + PGVector
-├── setup_db.py        # Active pgvector/vectorscale
-├── Dockerfile         # Image Python 3.11
-├── Makefile           # Commandes make
-└── requirements.txt   # Dépendances Python
-```
-
-### Usage
+Version Python préservée dans `python-version/` (indexeur LangChain + LiteLLM + PGVector) :
 
 ```bash
 cd python-version
-make setup
-make db-setup   # Active les extensions PostgreSQL
-make run        # Lance l'indexation
+make setup            # pip install -r requirements.txt
+make db-setup         # Active pgvector/vectorscale
+make run              # Lance indexation Python
 ```
+
+Stack : Python 3.11, LangChain, LiteLLM, pgvector, Rich (barres de progression).
 
 ---
 
 ## 16. Changelog
 
+### v0.1.1 (2025-07-04)
+
+#### 🚀 Nouvelles fonctionnalités
+
+- **Enrichissement contextuel des chunks via LLM** (`LLMService` trait + `LiteLLMTextService`) :
+  - Résumé automatique du document (1-2 phrases) ajouté comme préfixe contextuel à chaque chunk
+  - Extraction de métadonnées structurées : `inferred_tags` (tags thématiques), `document_summary`, `detected_entities`
+  - Chunks stockés avec le format : `"Document: {name}\nContext: {summary}\nChunk Content: {chunk}"`
+  - Nouvelle variable d'environnement : `LLM_MODEL` (défaut `gemini-3-flash`)
+  - Parsing JSON avec fallback pour les réponses LLM non conformes
+- **Endpoint `GET /api/indexing/stats`** :
+  - Statistiques PostgreSQL : total/completed/failed/in_progress/chunks/file_size
+  - Informations collection Qdrant : points_count, indexed_vectors, segments, status
+  - Statistiques d'utilisation : total_searches, searches_today/week, avg_duration, zero_result_searches, top_queries
+- **Statistiques d'utilisation des recherches** (table `search_logs`) :
+  - Chaque requête `POST /api/search` est automatiquement loggée avec durée et nombre de résultats
+  - Endpoint `/api/indexing/stats` expose les métriques d'usage
+  - Top 10 des requêtes les plus fréquentes
+
+#### 🔧 Technique
+
+- Nouveau trait `LLMService` dans `domain/ports.rs`
+- Nouveau `LiteLLMTextService` (chat completions OpenAI-compatible) dans `litellm.rs`
+- `IndexingUseCase` : nouvelle dépendance `LLMService`, 2 appels LLM par fichier (résumé + métadonnées)
+- `DocumentMetadata` : 3 nouveaux champs optionnels (`inferred_tags`, `document_summary`, `detected_entities`)
+- `QdrantVectorStore` : stocke et lit les nouveaux champs dans le payload Qdrant
+- `main.rs` : initialisation du LLM service avec fallback URL et clé
+- Migration `003_usage_stats.sql` : table `search_logs` avec index temporel
+- `PipelineRepository` : nouvelles méthodes `log_search` et `get_usage_stats`
+- `query_handlers.rs` : logging automatique des recherches avec timing
+- `pipeline_handlers.rs` : métriques d'usage intégrées dans `/api/indexing/stats`
+- CI locale (`local-ci.sh`) : fmt → clippy → test → build
+
 ### v0.1.0 (2025-05-16)
 
-#### Ajouts
-- Pipeline d'indexation complet : scan → parse → chunk → embed → store
+#### 🚀 Nouvelles fonctionnalités
+
+- Pipeline d'indexation complet : scan → parse (PDF/md/txt/log) → chunk → embed → store
 - Recherche hybride : embeddings vectoriels + reranking TEI
-- API REST avec Axum (health, auth, search, pipeline monitoring)
-- Monitoring d'indexation avec table `pipeline_runs`
-- Interface web dark mode (recherche + monitoring + correction)
+- API REST Axum : health, auth, search, pipeline monitoring
+- Monitoring avec table `pipeline_runs` (statut, étape, OCR, chunks, durée)
+- Interface web dark mode : search + pipeline monitor + correction
 - Support PDF avec extraction `pdf_oxide` (timeout 30s, spawn_blocking)
 - Support Markdown, TXT, Log
-- Hachage SHA256 pour déduplication
+- Hachage SHA256 pour déduplication et suivi des modifications
 - Tags hiérarchiques basés sur les dossiers
 - Métadonnées temporelles (création, modification)
-- Embedding via TEI ou LiteLLM (compatible OpenAI)
+- Embedding via TEI ou LiteLLM (OpenAI-compatible)
 - Reranking via TEI
-- Mode oneshot pour CronJob
-- Configuration 12-Factor (env vars + CLI)
+- Mode oneshot pour CronJob Kubernetes
+- Configuration 12-Factor (env vars + CLI clap)
 - Docker multi-stage (cargo-chef)
 - Helm chart pour déploiement Kubernetes
-- Workflow CI/CD GitHub Actions
+- Workflow CI/CD GitHub Actions (gitleaks, fmt, clippy, build, push)
 - Audit des fichiers non indexés (script Python + Job K8s)
 - Gestion des secrets via Vault
 - Logs structurés JSON (tracing)
 - Tests unitaires avec mockall
 - Legacy Python version préservée
 
-#### Technique
-- Architecture hexagonale (ports & adapters)
-- Async Rust avec Tokio
+#### 🏗️ Architecture
+
+- Hexagonale (ports & adapters)
+- Async Rust (Tokio + Axum)
 - Collection Qdrant : Cosinus, 3 shards, replication 2, on-disk payload, full-text index
-- Concurrence configurable (buffer_unordered 8)
+- Concurrence 8 (buffer_unordered)
 - Batch embedding (32 chunks)
 - Text splitter récursif multi-niveaux
-
-### v0.1.1 (2025-07-04)
-
-#### Ajouts
-- Nouvel endpoint `GET /api/indexing/stats` :
-  - Statistiques d'indexation (total, completed, failed, in_progress, chunks, taille)
-  - Informations de la collection Qdrant (points, vecteurs, segments, statut)
-- Méthode `get_collection_info` sur `VectorStore` trait
-- Méthode `get_indexing_stats` sur `PipelineRepository` trait
-
-#### Technique
-- Utilisation de l'API `collection_info` de Qdrant
-- Requêtes SQL `COUNT` / `SUM` sur `pipeline_runs`
-- CI locale (`local-ci.sh`) validée : fmt, clippy, tests, build
 
 ---
 
@@ -890,16 +1008,19 @@ make run        # Lance l'indexation
 |-------|------------|
 | **RAG** | Retrieval-Augmented Generation — Génération augmentée par la récupération d'information |
 | **Chunk** | Fragment de texte extrait d'un document, prêt à être vectorisé |
+| **Enriched Chunk** | Chunk enrichi avec le contexte du document : `"Document: {name}\nContext: {summary}\nContent: {chunk}"` |
 | **Embedding** | Représentation vectorielle d'un texte (tableau de flottants) |
 | **Reranking** | Seconde phase de classement qui réordonne les résultats d'une recherche initiale |
 | **TEI** | Text Embeddings Inference — Service HuggingFace pour embeddings et reranking |
 | **Qdrant** | Base de données vectorielle utilisée comme stockage principal |
-| **pgvector** | Extension PostgreSQL pour les recherches vectorielles (utilisée en legacy) |
+| **pgvector** | Extension PostgreSQL pour les recherches vectorielles (legacy) |
 | **LiteLLM** | Proxy compatible OpenAI API pour les modèles de langage |
-| **Pipeline Run** | Enregistrement du traitement d'un fichier individuel (de l'extraction au stockage) |
-| **Dense Vector** | Vecteur sémantique dense (non creux) représentant le sens d'un texte |
-| **Hybrid Search** | Combinaison de la recherche vectorielle (sens) et textuelle (mots-clés) |
-| **RRF** | Reciprocal Rank Fusion — Méthode de fusion de classements multiples |
+| **LLM Enrichment** | Processus d'appel à un LLM pour générer résumé, tags et entités d'un document |
+| **Pipeline Run** | Enregistrement du traitement d'un fichier (extraction → enrichissement → stockage) |
+| **Dense Vector** | Vecteur sémantique dense représentant le sens d'un texte |
+| **Hybrid Search** | Combinaison recherche vectorielle (sens) + textuelle (mots-clés) |
 | **Cosine Distance** | Mesure de similarité entre deux vecteurs (angle) |
-| **On-disk payload** | Stockage des métadonnées sur disque plutôt qu'en mémoire (économise RAM) |
+| **On-disk payload** | Stockage des métadonnées Qdrant sur disque plutôt qu'en mémoire |
 | **SHA256** | Fonction de hachage cryptographique pour l'intégrité des fichiers |
+| **RRF** | Reciprocal Rank Fusion — Méthode de fusion de classements multiples |
+| **Oneshot** | Mode où Mnemosyne indexe puis s'arrête (pour CronJob) |
