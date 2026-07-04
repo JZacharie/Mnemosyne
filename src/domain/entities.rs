@@ -18,6 +18,9 @@ pub struct DocumentMetadata {
     pub creation_date: i64,
     pub file_hash: String,
     pub folder_tags: Vec<String>,
+    pub inferred_tags: Option<Vec<String>>,
+    pub document_summary: Option<String>,
+    pub detected_entities: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

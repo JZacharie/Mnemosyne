@@ -119,6 +119,9 @@ impl FileScanner for LocalFileScanner {
                 creation_date,
                 file_hash,
                 folder_tags,
+                inferred_tags: None,
+                document_summary: None,
+                detected_entities: None,
             },
         })
     }

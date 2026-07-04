@@ -85,6 +85,16 @@ impl VectorStore for QdrantVectorStore {
                 payload.insert("file_hash".to_string(), chunk.metadata.file_hash.into());
                 payload.insert("folder_tags".to_string(), chunk.metadata.folder_tags.into());
 
+                if let Some(ref tags) = chunk.metadata.inferred_tags {
+                    payload.insert("inferred_tags".to_string(), tags.clone().into());
+                }
+                if let Some(ref summary) = chunk.metadata.document_summary {
+                    payload.insert("document_summary".to_string(), summary.clone().into());
+                }
+                if let Some(ref entities) = chunk.metadata.detected_entities {
+                    payload.insert("detected_entities".to_string(), entities.clone().into());
+                }
+
                 points.push(PointStruct::new(
                     uuid::Uuid::new_v4().to_string(),
                     embedding,
@@ -179,6 +189,28 @@ impl VectorStore for QdrantVectorStore {
                             .collect()
                     })
                     .unwrap_or_default(),
+                inferred_tags: payload
+                    .get("inferred_tags")
+                    .and_then(|v| v.as_list())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
+                document_summary: payload
+                    .get("document_summary")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                detected_entities: payload
+                    .get("detected_entities")
+                    .and_then(|v| v.as_list())
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect()
+                    }),
             };
 
             chunks.push(DocumentChunk {

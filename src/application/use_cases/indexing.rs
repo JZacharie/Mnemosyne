@@ -1,8 +1,11 @@
 use crate::domain::entities::{DocumentChunk, PipelineRun};
-use crate::domain::ports::{EmbeddingService, FileScanner, PipelineRepository, VectorStore};
+use crate::domain::ports::{
+    EmbeddingService, FileScanner, LLMService, PipelineRepository, VectorStore,
+};
 use anyhow::Result;
 use chrono::Utc;
 use futures::StreamExt;
+use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -13,6 +16,7 @@ pub struct IndexingUseCase {
     embedding_service: Arc<dyn EmbeddingService>,
     vector_store: Arc<dyn VectorStore>,
     pipeline_repo: Arc<dyn PipelineRepository>,
+    llm_service: Arc<dyn LLMService>,
 }
 
 impl IndexingUseCase {
@@ -21,12 +25,14 @@ impl IndexingUseCase {
         embedding_service: Arc<dyn EmbeddingService>,
         vector_store: Arc<dyn VectorStore>,
         pipeline_repo: Arc<dyn PipelineRepository>,
+        llm_service: Arc<dyn LLMService>,
     ) -> Self {
         Self {
             file_scanner,
             embedding_service,
             vector_store,
             pipeline_repo,
+            llm_service,
         }
     }
 
@@ -175,12 +181,83 @@ impl IndexingUseCase {
             doc
         };
 
+        let mut doc = doc;
+        let mut doc_context = String::new();
+
+        if !doc.content.trim().is_empty() {
+            let truncated_content = if doc.content.len() > 10000 {
+                &doc.content[..10000]
+            } else {
+                &doc.content
+            };
+
+            // Call LLM for document summary (context wrapper)
+            let summary_system = "You are a precise context summarizer.";
+            let summary_user = format!(
+                "Provide a brief 1-2 sentence summary of this document. It will prefix search chunks to provide context.\n\nDocument text:\n{}",
+                truncated_content
+            );
+            if let Ok(sum) = self
+                .llm_service
+                .generate_text(summary_system, &summary_user)
+                .await
+            {
+                doc_context = sum;
+            }
+
+            // Call LLM for structured metadata JSON
+            let meta_system = "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.";
+            let meta_user = format!(
+                "Extract metadata from this document as JSON with these keys:\n- inferred_tags (list of strings for topics/categories)\n- document_summary (string summary, max 3 sentences)\n- detected_entities (list of key entities mentioned)\n\nDocument text:\n{}",
+                truncated_content
+            );
+            if let Ok(meta_raw) = self
+                .llm_service
+                .generate_text(meta_system, &meta_user)
+                .await
+            {
+                #[derive(Deserialize)]
+                struct TempMeta {
+                    inferred_tags: Option<Vec<String>>,
+                    document_summary: Option<String>,
+                    detected_entities: Option<Vec<String>>,
+                }
+                if let Ok(parsed) = serde_json::from_str::<TempMeta>(&meta_raw) {
+                    doc.metadata.inferred_tags = parsed.inferred_tags;
+                    doc.metadata.document_summary = parsed.document_summary;
+                    doc.metadata.detected_entities = parsed.detected_entities;
+                } else {
+                    let clean_raw = meta_raw.replace("```json", "").replace("```", "");
+                    if let Ok(parsed) = serde_json::from_str::<TempMeta>(&clean_raw) {
+                        doc.metadata.inferred_tags = parsed.inferred_tags;
+                        doc.metadata.document_summary = parsed.document_summary;
+                        doc.metadata.detected_entities = parsed.detected_entities;
+                    }
+                }
+            }
+        }
+
         run.extracted_text = Some(doc.content.clone());
         run.current_step = "CHUNKING".to_string();
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
         // Step 2: Chunking logic
         let chunks_content = split_text(&doc.content, chunk_size, chunk_overlap);
+
+        // Prepend context summary to each chunk
+        let enriched_chunks: Vec<String> = if !doc_context.is_empty() {
+            chunks_content
+                .iter()
+                .map(|chunk| {
+                    format!(
+                        "Document: {}\nContext: {}\nChunk Content: {}",
+                        doc.metadata.file_name, doc_context, chunk
+                    )
+                })
+                .collect()
+        } else {
+            chunks_content.clone()
+        };
 
         run.chunks_count = Some(chunks_content.len() as i32);
         run.chunks = Some(serde_json::to_value(&chunks_content).unwrap_or(serde_json::Value::Null));
@@ -189,7 +266,7 @@ impl IndexingUseCase {
 
         // Step 3: Embeddings
         let mut embeddings = Vec::new();
-        for batch in chunks_content.chunks(32) {
+        for batch in enriched_chunks.chunks(32) {
             let batch_embeddings = self
                 .embedding_service
                 .generate_embeddings(batch.to_vec())
@@ -201,7 +278,7 @@ impl IndexingUseCase {
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
         // Step 4: Save to vector database
-        let doc_chunks: Vec<DocumentChunk> = chunks_content
+        let doc_chunks: Vec<DocumentChunk> = enriched_chunks
             .into_iter()
             .zip(embeddings)
             .map(|(content, embedding)| DocumentChunk {

@@ -127,8 +127,8 @@ async fn main() -> anyhow::Result<()> {
         args.tei_reranker_url,
     ));
 
-    let embedding_service: Arc<dyn EmbeddingService> = if let Some(url) = pylos_url {
-        let api_key = pylos_api_key.unwrap_or_default();
+    let embedding_service: Arc<dyn EmbeddingService> = if let Some(url) = pylos_url.clone() {
+        let api_key = pylos_api_key.clone().unwrap_or_default();
         Arc::new(
             mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
                 url,
@@ -143,12 +143,26 @@ async fn main() -> anyhow::Result<()> {
     let vector_store = Arc::new(QdrantVectorStore::new(&args.qdrant_url).await?);
     let account_repo = Arc::new(PostgresAccountRepository::new(pool.clone()));
 
+    let llm_url = pylos_url
+        .clone()
+        .unwrap_or_else(|| "http://litellm.litellm.svc.cluster.local:4000".to_string());
+    let llm_api_key = pylos_api_key.clone().unwrap_or_default();
+    let llm_model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "gemini-3-flash".to_string());
+    let llm_service = Arc::new(
+        mnemosyne::infrastructure::embedding::litellm::LiteLLMTextService::new(
+            llm_url,
+            llm_api_key,
+            llm_model,
+        ),
+    );
+
     // Initialize use cases
     let indexing_use_case = Arc::new(IndexingUseCase::new(
         file_scanner,
         embedding_service.clone(),
         vector_store.clone(),
         account_repo.clone(),
+        llm_service.clone(),
     ));
 
     let auth_use_case = Arc::new(AuthUseCase::new(account_repo.clone(), account_repo.clone()));

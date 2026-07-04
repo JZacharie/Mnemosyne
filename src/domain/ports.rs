@@ -62,3 +62,8 @@ pub trait PipelineRepository: Send + Sync {
     async fn list_runs(&self) -> Result<Vec<PipelineRun>>;
     async fn get_indexing_stats(&self) -> Result<Value>;
 }
+
+#[async_trait]
+pub trait LLMService: Send + Sync {
+    async fn generate_text(&self, system_prompt: &str, user_prompt: &str) -> Result<String>;
+}
