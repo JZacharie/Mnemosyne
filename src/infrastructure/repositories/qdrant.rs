@@ -3,7 +3,7 @@ use crate::domain::ports::VectorStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, Distance, FieldType, Filter, PointStruct,
+    CreateCollectionBuilder, Distance, FieldType, PointStruct,
     QueryPointsBuilder, UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
@@ -104,7 +104,7 @@ impl VectorStore for QdrantVectorStore {
 
     async fn search(
         &self,
-        query_text: &str,
+        _query_text: &str,
         query_vector: Vec<f32>,
         limit: usize,
         collection_name: &str,
@@ -117,12 +117,9 @@ impl VectorStore for QdrantVectorStore {
             collection_name, limit
         );
 
-        // Hybrid Search: Vector Search narrowed by Full-Text filtering
+        // Vector Search candidate retrieval for cross-encoder reranking
         let request = QueryPointsBuilder::new(collection_name)
             .query(query_vector)
-            .filter(Filter::must(vec![Condition::matches_text(
-                "content", query_text,
-            )]))
             .limit(limit as u64)
             .with_payload(true)
             .build();

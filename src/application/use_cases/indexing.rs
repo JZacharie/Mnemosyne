@@ -180,25 +180,7 @@ impl IndexingUseCase {
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
         // Step 2: Chunking logic
-        let content_chars: Vec<char> = doc.content.chars().collect();
-        let mut chunks_content = Vec::new();
-
-        let mut start = 0;
-        while start < content_chars.len() {
-            let end = std::cmp::min(start + chunk_size, content_chars.len());
-            let chunk_str: String = content_chars[start..end].iter().collect();
-            chunks_content.push(chunk_str);
-            if end == content_chars.len() {
-                break;
-            }
-            // Advance by chunk_size - chunk_overlap
-            let step = if chunk_size > chunk_overlap {
-                chunk_size - chunk_overlap
-            } else {
-                1
-            };
-            start += step;
-        }
+        let chunks_content = split_text(&doc.content, chunk_size, chunk_overlap);
 
         run.chunks_count = Some(chunks_content.len() as i32);
         run.chunks = Some(serde_json::to_value(&chunks_content).unwrap_or(serde_json::Value::Null));
@@ -236,4 +218,104 @@ impl IndexingUseCase {
 
         Ok(())
     }
+}
+
+fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String> {
+    let separators = vec!["\n\n", "\n", " ", ""];
+    let mut final_chunks = Vec::new();
+
+    fn split_recursive(
+        text: &str,
+        separators: &[&str],
+        chunk_size: usize,
+        chunk_overlap: usize,
+        chunks: &mut Vec<String>,
+    ) {
+        if text.chars().count() <= chunk_size {
+            if !text.trim().is_empty() {
+                chunks.push(text.to_string());
+            }
+            return;
+        }
+
+        let (separator, remaining_separators) = if let Some((&first, rest)) = separators.split_first() {
+            (first, rest)
+        } else {
+            // Fallback to hard character splitting
+            let chars: Vec<char> = text.chars().collect();
+            let mut start = 0;
+            while start < chars.len() {
+                let end = std::cmp::min(start + chunk_size, chars.len());
+                let s: String = chars[start..end].iter().collect();
+                if !s.trim().is_empty() {
+                    chunks.push(s);
+                }
+                if end == chars.len() {
+                    break;
+                }
+                let step = if chunk_size > chunk_overlap { chunk_size - chunk_overlap } else { 1 };
+                start += step;
+            }
+            return;
+        };
+
+        // Split by the current separator
+        let splits: Vec<String> = if separator.is_empty() {
+            text.chars().map(|c| c.to_string()).collect()
+        } else {
+            text.split(separator).map(|s| s.to_string()).collect()
+        };
+
+        let mut current_doc = Vec::new();
+        let mut total_len = 0;
+
+        for split in splits {
+            let split_len = split.chars().count();
+            let sep_len = if total_len > 0 { separator.chars().count() } else { 0 };
+
+            if total_len + split_len + sep_len <= chunk_size {
+                current_doc.push(split);
+                total_len += split_len + sep_len;
+            } else {
+                if !current_doc.is_empty() {
+                    let chunk_str = current_doc.join(separator);
+                    chunks.push(chunk_str);
+
+                    // Rebuild current_doc with overlap elements
+                    let mut overlap_doc = Vec::new();
+                    let mut overlap_len = 0;
+                    for item in current_doc.iter().rev() {
+                        let item_len = item.chars().count();
+                        let o_sep_len = if overlap_len > 0 { separator.chars().count() } else { 0 };
+                        if overlap_len + item_len + o_sep_len <= chunk_overlap {
+                            overlap_doc.insert(0, item.clone());
+                            overlap_len += item_len + o_sep_len;
+                        } else {
+                            break;
+                        }
+                    }
+                    current_doc = overlap_doc;
+                    total_len = overlap_len;
+                }
+
+                if split_len > chunk_size {
+                    split_recursive(&split, remaining_separators, chunk_size, chunk_overlap, chunks);
+                } else {
+                    let sep_len = if total_len > 0 { separator.chars().count() } else { 0 };
+                    current_doc.push(split);
+                    total_len += split_len + sep_len;
+                }
+            }
+        }
+
+        if !current_doc.is_empty() {
+            let chunk_str = current_doc.join(separator);
+            if !chunk_str.trim().is_empty() {
+                chunks.push(chunk_str);
+            }
+        }
+    }
+
+    split_recursive(text, &separators, chunk_size, chunk_overlap, &mut final_chunks);
+    final_chunks
 }
