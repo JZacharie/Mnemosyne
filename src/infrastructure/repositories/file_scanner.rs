@@ -46,7 +46,17 @@ impl FileScanner for LocalFileScanner {
         // 2. Load Content
         let content = if path.extension().map(|e| e == "pdf").unwrap_or(false) {
             let fp = file_path.to_string();
-            let handle = tokio::task::spawn_blocking(move || pdf_extract::extract_text(&fp));
+            let handle = tokio::task::spawn_blocking(move || -> Result<String, pdf_oxide::Error> {
+                let doc = pdf_oxide::PdfDocument::open(&fp)?;
+                let mut full_text = String::new();
+                for i in 0..doc.page_count()? {
+                    if let Ok(page_text) = doc.extract_text(i) {
+                        full_text.push_str(&page_text);
+                        full_text.push('\n');
+                    }
+                }
+                Ok(full_text)
+            });
 
             match tokio::time::timeout(std::time::Duration::from_secs(30), handle).await {
                 Ok(Ok(Ok(text))) if !text.trim().is_empty() => text,
