@@ -29,6 +29,8 @@ spec:
         - "80"
         - --dtype
         - float16
+        - --backend
+        - candle
         ports:
         - containerPort: 80
         env:

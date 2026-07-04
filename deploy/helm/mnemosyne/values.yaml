@@ -71,7 +71,7 @@ tei:
     url: "http://mnemosyne-tei-embedder.mnemosyne.svc.cluster.local"
   reranker:
     enabled: true
-    model: "BAAI/bge-reranker-large"
+    model: "BAAI/bge-reranker-v2-m3"
     url: "http://mnemosyne-tei-reranker.mnemosyne.svc.cluster.local"
 
 
