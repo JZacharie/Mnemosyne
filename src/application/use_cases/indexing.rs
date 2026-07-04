@@ -348,3 +348,35 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
     );
     final_chunks
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_text_simple() {
+        let text = "Hello world from Mnemosyne RAG";
+        let chunks = split_text(text, 10, 2);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 10);
+        }
+    }
+
+    #[test]
+    fn test_split_text_paragraphs() {
+        let text = "Paragraph 1\n\nParagraph 2 is longer and will split\n\nParagraph 3";
+        let chunks = split_text(text, 20, 5);
+        assert!(chunks.len() >= 3);
+        assert_eq!(chunks[0], "Paragraph 1");
+    }
+
+    #[test]
+    fn test_split_text_respects_sentence_boundary() {
+        let text = "Sentence one. Sentence two. Sentence three.";
+        let chunks = split_text(text, 15, 0);
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 15);
+        }
+    }
+}
