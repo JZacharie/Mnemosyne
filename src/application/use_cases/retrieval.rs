@@ -72,6 +72,7 @@ mod tests {
             async fn save_chunks(&self, chunks: Vec<DocumentChunk>, collection_name: &str) -> Result<()>;
             async fn search(&self, query_text: &str, query_vector: Vec<f32>, limit: usize, collection_name: &str) -> Result<Vec<DocumentChunk>>;
             async fn health_check(&self) -> Result<()>;
+            async fn get_collection_info(&self, collection_name: &str) -> Result<serde_json::Value>;
         }
     }
 

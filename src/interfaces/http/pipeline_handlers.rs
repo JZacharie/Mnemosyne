@@ -53,6 +53,38 @@ pub async fn get_run_handler(
     }
 }
 
+pub async fn indexing_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let db_stats = match state.pipeline_repo.get_indexing_stats().await {
+        Ok(stats) => stats,
+        Err(e) => {
+            error!("Failed to get indexing stats: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let qdrant_info = match state
+        .vector_store
+        .get_collection_info(&state.collection_name)
+        .await
+    {
+        Ok(info) => info,
+        Err(e) => {
+            error!("Failed to get Qdrant collection info: {}", e);
+            serde_json::json!({ "error": e.to_string() })
+        }
+    };
+
+    Json(serde_json::json!({
+        "indexing": db_stats,
+        "vector_database": qdrant_info,
+    }))
+    .into_response()
+}
+
 pub async fn retry_run_handler(
     State(state): State<AppState>,
     Json(payload): Json<RetryRequest>,

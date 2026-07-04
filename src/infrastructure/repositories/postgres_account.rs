@@ -2,6 +2,7 @@ use crate::domain::entities::{AuditLog, PipelineRun, User};
 use crate::domain::ports::{AuditRepository, PipelineRepository, UserRepository};
 use anyhow::Result;
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -233,5 +234,47 @@ impl PipelineRepository for PostgresAccountRepository {
             .collect();
 
         Ok(runs)
+    }
+
+    async fn get_indexing_stats(&self) -> Result<Value> {
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_runs")
+            .fetch_one(&self.pool)
+            .await?;
+
+        let completed: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status = 'COMPLETED'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let failed: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status = 'FAILED'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let in_progress: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pipeline_runs WHERE status = 'IN_PROGRESS'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let total_chunks: Option<i64> = sqlx::query_scalar(
+            "SELECT SUM(chunks_count) FROM pipeline_runs WHERE status = 'COMPLETED'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let total_file_size: Option<i64> = sqlx::query_scalar(
+            "SELECT SUM(file_size) FROM pipeline_runs WHERE status = 'COMPLETED'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(serde_json::json!({
+            "total_files": total,
+            "completed_files": completed,
+            "failed_files": failed,
+            "in_progress_files": in_progress,
+            "total_chunks": total_chunks.unwrap_or(0),
+            "total_file_size_bytes": total_file_size.unwrap_or(0),
+        }))
     }
 }

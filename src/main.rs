@@ -18,7 +18,7 @@ use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRe
 use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
 use mnemosyne::interfaces::http::auth_handlers::login_handler;
 use mnemosyne::interfaces::http::pipeline_handlers::{
-    get_run_handler, list_runs_handler, retry_run_handler,
+    get_run_handler, indexing_stats_handler, list_runs_handler, retry_run_handler,
 };
 use mnemosyne::interfaces::http::query_handlers::search_handler;
 use tower_http::cors::{Any, CorsLayer};
@@ -172,6 +172,10 @@ async fn main() -> anyhow::Result<()> {
     // Build Axum router
     let app = Router::new()
         .route("/health", axum::routing::get(health_handler))
+        .route(
+            "/api/indexing/stats",
+            axum::routing::get(indexing_stats_handler),
+        )
         .route("/api/auth/login", post(login_handler))
         .route("/api/search", post(search_handler))
         .route("/api/pipeline/runs", axum::routing::get(list_runs_handler))

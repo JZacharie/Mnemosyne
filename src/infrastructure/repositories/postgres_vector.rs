@@ -2,6 +2,7 @@ use crate::domain::entities::DocumentChunk;
 use crate::domain::ports::VectorStore;
 use anyhow::Result;
 use async_trait::async_trait;
+use serde_json::Value;
 use sqlx::PgPool;
 use tracing::info;
 
@@ -58,5 +59,13 @@ impl VectorStore for PostgresVectorStore {
     async fn health_check(&self) -> Result<()> {
         sqlx::query("SELECT 1").execute(&self.pool).await?;
         Ok(())
+    }
+
+    async fn get_collection_info(&self, collection_name: &str) -> Result<Value> {
+        Ok(serde_json::json!({
+            "exists": false,
+            "collection_name": collection_name,
+            "note": "PostgresVectorStore does not support collection info"
+        }))
     }
 }

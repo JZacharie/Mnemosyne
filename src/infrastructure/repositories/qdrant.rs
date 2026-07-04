@@ -197,4 +197,28 @@ impl VectorStore for QdrantVectorStore {
         self.client.health_check().await?;
         Ok(())
     }
+
+    async fn get_collection_info(&self, collection_name: &str) -> Result<serde_json::Value> {
+        let exists = self.client.collection_exists(collection_name).await?;
+        if !exists {
+            return Ok(serde_json::json!({
+                "exists": false,
+                "collection_name": collection_name,
+            }));
+        }
+
+        let response = self.client.collection_info(collection_name).await?;
+        let info = response.result.unwrap_or_default();
+
+        let status_str = info.status().as_str_name().to_string();
+
+        Ok(serde_json::json!({
+            "exists": true,
+            "collection_name": collection_name,
+            "points_count": info.points_count(),
+            "indexed_vectors_count": info.indexed_vectors_count(),
+            "segments_count": info.segments_count,
+            "status": status_str,
+        }))
+    }
 }
