@@ -84,6 +84,12 @@ impl RerankingService for TEIService {
             return Ok(documents);
         }
 
+        if self.reranker_url.is_empty() {
+            debug!("TEI: Reranker URL is empty, bypassing reranking step");
+            documents.truncate(top_n);
+            return Ok(documents);
+        }
+
         debug!("TEI: Reranking {} documents for query", documents.len());
 
         let texts: Vec<String> = documents.iter().map(|d| d.content.clone()).collect();
