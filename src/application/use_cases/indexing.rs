@@ -185,11 +185,7 @@ impl IndexingUseCase {
         let mut doc_context = String::new();
 
         if !doc.content.trim().is_empty() {
-            let truncated_content = if doc.content.len() > 10000 {
-                &doc.content[..10000]
-            } else {
-                &doc.content
-            };
+            let truncated_content = safe_truncate(&doc.content, 10000);
 
             // Call LLM for document summary (context wrapper)
             let summary_system = "You are a precise context summarizer.";
@@ -273,6 +269,18 @@ impl IndexingUseCase {
             .await?;
 
         Ok(())
+    }
+}
+
+fn safe_truncate(text: &str, limit: usize) -> &str {
+    if text.len() > limit {
+        let mut end = limit;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        &text[..end]
+    } else {
+        text
     }
 }
 
@@ -624,5 +632,28 @@ mod tests {
         let parsed = parse_llm_metadata(raw).unwrap();
         assert_eq!(parsed.inferred_tags, Some(vec!["plain".to_string()]));
         assert_eq!(parsed.document_summary, Some("No lang hint".to_string()));
+    }
+
+    // --- safe_truncate tests ---
+
+    #[test]
+    fn test_safe_truncate_ascii() {
+        let text = "Hello World";
+        assert_eq!(safe_truncate(text, 5), "Hello");
+        assert_eq!(safe_truncate(text, 100), "Hello World");
+    }
+
+    #[test]
+    fn test_safe_truncate_unicode_boundary() {
+        let text = "HelloéWorld"; // 'é' is 2 bytes (195, 169)
+                                  // 'é' starts at byte index 5, ends at 7
+        assert_eq!(safe_truncate(text, 5), "Hello");
+        assert_eq!(safe_truncate(text, 6), "Hello"); // falls back to 5
+        assert_eq!(safe_truncate(text, 7), "Helloé");
+    }
+
+    #[test]
+    fn test_safe_truncate_empty() {
+        assert_eq!(safe_truncate("", 10), "");
     }
 }
