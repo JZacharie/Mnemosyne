@@ -1,41 +1,47 @@
-use std::sync::Arc;
+use axum::{extract::State, http::StatusCode, routing::post, Router};
 use clap::Parser;
 use dotenvy::dotenv;
 use sqlx::PgPool;
-use tracing::{info, error};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use axum::{
-    routing::post,
-    Router,
-    extract::State,
-    http::StatusCode,
-};
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tracing::{error, info};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use axum::response::IntoResponse;
 use axum::Json;
-use tower_http::cors::{Any, CorsLayer};
-use mnemosyne::infrastructure::repositories::file_scanner::LocalFileScanner;
-use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
-use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRepository;
-use mnemosyne::infrastructure::embedding::tei::TEIService;
-use mnemosyne::application::use_cases::indexing::IndexingUseCase;
 use mnemosyne::application::use_cases::auth::AuthUseCase;
+use mnemosyne::application::use_cases::indexing::IndexingUseCase;
 use mnemosyne::application::use_cases::retrieval::RetrievalUseCase;
+use mnemosyne::infrastructure::embedding::tei::TEIService;
+use mnemosyne::infrastructure::repositories::file_scanner::LocalFileScanner;
+use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRepository;
+use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
 use mnemosyne::interfaces::http::auth_handlers::login_handler;
+use mnemosyne::interfaces::http::pipeline_handlers::{
+    get_run_handler, list_runs_handler, retry_run_handler,
+};
 use mnemosyne::interfaces::http::query_handlers::search_handler;
-use mnemosyne::interfaces::http::pipeline_handlers::{list_runs_handler, get_run_handler, retry_run_handler};
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, env = "NFS_PATH", default_value = "/data/nfs", value_delimiter = ',')]
+    #[arg(
+        long,
+        env = "NFS_PATH",
+        default_value = "/data/nfs",
+        value_delimiter = ','
+    )]
     paths: Vec<String>,
 
     #[arg(long, env = "DATABASE_URL")]
     database_url: String,
 
-    #[arg(long, env = "QDRANT_URL", default_value = "http://qdrant.qdrant.svc.cluster.local:6333")]
+    #[arg(
+        long,
+        env = "QDRANT_URL",
+        default_value = "http://qdrant.qdrant.svc.cluster.local:6333"
+    )]
     qdrant_url: String,
 
     #[arg(long, env = "COLLECTION_NAME", default_value = "mnemosyne_docs")]
@@ -44,10 +50,18 @@ struct Args {
     #[arg(long, env = "EMBEDDING_MODEL", default_value = "BAAI/bge-m3")]
     embedding_model: String,
 
-    #[arg(long, env = "TEI_EMBEDDER_URL", default_value = "http://mnemosyne-tei-embedder.mnemosyne.svc.cluster.local")]
+    #[arg(
+        long,
+        env = "TEI_EMBEDDER_URL",
+        default_value = "http://mnemosyne-tei-embedder.mnemosyne.svc.cluster.local"
+    )]
     tei_embedder_url: String,
 
-    #[arg(long, env = "TEI_RERANKER_URL", default_value = "http://mnemosyne-tei-reranker.mnemosyne.svc.cluster.local")]
+    #[arg(
+        long,
+        env = "TEI_RERANKER_URL",
+        default_value = "http://mnemosyne-tei-reranker.mnemosyne.svc.cluster.local"
+    )]
     tei_reranker_url: String,
 
     #[arg(long, env = "PYLOS_URL")]
@@ -66,8 +80,8 @@ struct Args {
     oneshot: bool,
 }
 
-use mnemosyne::AppState;
 use mnemosyne::domain::ports::EmbeddingService;
+use mnemosyne::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -86,7 +100,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let pylos_url = args.pylos_url.or_else(|| std::env::var("LITELLM_URL").ok());
-    let pylos_api_key = args.pylos_api_key.or_else(|| std::env::var("LITELLM_API_KEY").ok());
+    let pylos_api_key = args
+        .pylos_api_key
+        .or_else(|| std::env::var("LITELLM_API_KEY").ok());
 
     info!("🧠 Mnemosyne Service starting...");
     info!("🚀 Using Qdrant at: {}", args.qdrant_url);
@@ -101,13 +117,11 @@ async fn main() -> anyhow::Result<()> {
     let pool = PgPool::connect(&args.database_url).await?;
 
     info!("⚙️ Running database migrations...");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     // Initialize adapters
     let file_scanner = Arc::new(LocalFileScanner::new(args.pvc_name));
-    
+
     let tei_service = Arc::new(TEIService::new(
         args.tei_embedder_url,
         args.tei_reranker_url,
@@ -115,11 +129,13 @@ async fn main() -> anyhow::Result<()> {
 
     let embedding_service: Arc<dyn EmbeddingService> = if let Some(url) = pylos_url {
         let api_key = pylos_api_key.unwrap_or_default();
-        Arc::new(mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
-            url,
-            api_key,
-            args.embedding_model.clone(),
-        ))
+        Arc::new(
+            mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
+                url,
+                api_key,
+                args.embedding_model.clone(),
+            ),
+        )
     } else {
         tei_service.clone()
     };
@@ -134,11 +150,8 @@ async fn main() -> anyhow::Result<()> {
         vector_store.clone(),
         account_repo.clone(),
     ));
-    
-    let auth_use_case = Arc::new(AuthUseCase::new(
-        account_repo.clone(),
-        account_repo.clone(),
-    ));
+
+    let auth_use_case = Arc::new(AuthUseCase::new(account_repo.clone(), account_repo.clone()));
 
     let retrieval_use_case = Arc::new(RetrievalUseCase::new(
         vector_store.clone(),
@@ -162,7 +175,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/auth/login", post(login_handler))
         .route("/api/search", post(search_handler))
         .route("/api/pipeline/runs", axum::routing::get(list_runs_handler))
-        .route("/api/pipeline/runs/:id", axum::routing::get(get_run_handler))
+        .route(
+            "/api/pipeline/runs/:id",
+            axum::routing::get(get_run_handler),
+        )
         .route("/api/pipeline/retry", post(retry_run_handler))
         .layer(
             CorsLayer::new()
@@ -175,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
     // Start HTTP server in background
     let addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
     info!("🌐 HTTP server listening on {}", addr);
-    
+
     let server_handle = tokio::spawn(async move {
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
@@ -191,13 +207,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Run initial indexing for each path
     for path in args.paths {
-        if let Err(e) = indexing_use_case.execute(&path, &args.collection_name).await {
+        if let Err(e) = indexing_use_case
+            .execute(&path, &args.collection_name)
+            .await
+        {
             error!("Error indexing path {}: {}", path, e);
         }
     }
 
     info!("✨ Initial indexing job complete!");
-    
+
     if args.oneshot {
         info!("🛑 Oneshot mode enabled, exiting...");
         return Ok(());

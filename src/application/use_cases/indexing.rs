@@ -238,26 +238,31 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
             return;
         }
 
-        let (separator, remaining_separators) = if let Some((&first, rest)) = separators.split_first() {
-            (first, rest)
-        } else {
-            // Fallback to hard character splitting
-            let chars: Vec<char> = text.chars().collect();
-            let mut start = 0;
-            while start < chars.len() {
-                let end = std::cmp::min(start + chunk_size, chars.len());
-                let s: String = chars[start..end].iter().collect();
-                if !s.trim().is_empty() {
-                    chunks.push(s);
+        let (separator, remaining_separators) =
+            if let Some((&first, rest)) = separators.split_first() {
+                (first, rest)
+            } else {
+                // Fallback to hard character splitting
+                let chars: Vec<char> = text.chars().collect();
+                let mut start = 0;
+                while start < chars.len() {
+                    let end = std::cmp::min(start + chunk_size, chars.len());
+                    let s: String = chars[start..end].iter().collect();
+                    if !s.trim().is_empty() {
+                        chunks.push(s);
+                    }
+                    if end == chars.len() {
+                        break;
+                    }
+                    let step = if chunk_size > chunk_overlap {
+                        chunk_size - chunk_overlap
+                    } else {
+                        1
+                    };
+                    start += step;
                 }
-                if end == chars.len() {
-                    break;
-                }
-                let step = if chunk_size > chunk_overlap { chunk_size - chunk_overlap } else { 1 };
-                start += step;
-            }
-            return;
-        };
+                return;
+            };
 
         // Split by the current separator
         let splits: Vec<String> = if separator.is_empty() {
@@ -271,7 +276,11 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
 
         for split in splits {
             let split_len = split.chars().count();
-            let sep_len = if total_len > 0 { separator.chars().count() } else { 0 };
+            let sep_len = if total_len > 0 {
+                separator.chars().count()
+            } else {
+                0
+            };
 
             if total_len + split_len + sep_len <= chunk_size {
                 current_doc.push(split);
@@ -286,7 +295,11 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
                     let mut overlap_len = 0;
                     for item in current_doc.iter().rev() {
                         let item_len = item.chars().count();
-                        let o_sep_len = if overlap_len > 0 { separator.chars().count() } else { 0 };
+                        let o_sep_len = if overlap_len > 0 {
+                            separator.chars().count()
+                        } else {
+                            0
+                        };
                         if overlap_len + item_len + o_sep_len <= chunk_overlap {
                             overlap_doc.insert(0, item.clone());
                             overlap_len += item_len + o_sep_len;
@@ -299,9 +312,19 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
                 }
 
                 if split_len > chunk_size {
-                    split_recursive(&split, remaining_separators, chunk_size, chunk_overlap, chunks);
+                    split_recursive(
+                        &split,
+                        remaining_separators,
+                        chunk_size,
+                        chunk_overlap,
+                        chunks,
+                    );
                 } else {
-                    let sep_len = if total_len > 0 { separator.chars().count() } else { 0 };
+                    let sep_len = if total_len > 0 {
+                        separator.chars().count()
+                    } else {
+                        0
+                    };
                     current_doc.push(split);
                     total_len += split_len + sep_len;
                 }
@@ -316,6 +339,12 @@ fn split_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String
         }
     }
 
-    split_recursive(text, &separators, chunk_size, chunk_overlap, &mut final_chunks);
+    split_recursive(
+        text,
+        &separators,
+        chunk_size,
+        chunk_overlap,
+        &mut final_chunks,
+    );
     final_chunks
 }
