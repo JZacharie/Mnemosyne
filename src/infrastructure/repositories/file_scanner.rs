@@ -48,6 +48,20 @@ impl FileScanner for LocalFileScanner {
                 "temp",
                 "dist",
                 ".github",
+                "07_development",
+                "git",
+                ".terraform",
+                "gems",
+                "lib",
+                "bin",
+                "obj",
+                "build",
+                "deps",
+                "packages",
+                "add-ons",
+                "licenses",
+                "test",
+                "tests",
             ]
             .contains(&name.as_str())
         });
