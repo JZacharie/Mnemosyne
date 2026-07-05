@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Gitleaks Scan
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -47,7 +47,7 @@ jobs:
         run: cargo clippy -- -D warnings
 
       - name: Auto-commit fixes
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "style: auto-format and fix lints"
           file_pattern: 'src/**/*.rs'
