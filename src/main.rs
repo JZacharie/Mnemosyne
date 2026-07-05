@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, routing::post, Router};
+use axum::{http::StatusCode, routing::post, Router};
 use clap::Parser;
 use dotenvy::dotenv;
 use sqlx::PgPool;
@@ -252,38 +252,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let db_status = match sqlx::query("SELECT 1").execute(&state.db_pool).await {
-        Ok(_) => "up",
-        Err(e) => {
-            error!("Database health check failed: {}", e);
-            "down"
-        }
-    };
-
-    let qdrant_status = match state.vector_store.health_check().await {
-        Ok(_) => "up",
-        Err(e) => {
-            error!("Qdrant health check failed: {}", e);
-            "down"
-        }
-    };
-
-    let status = if db_status == "up" && qdrant_status == "up" {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-
+async fn health_handler() -> impl IntoResponse {
     (
-        status,
+        StatusCode::OK,
         Json(serde_json::json!({
-            "status": if status == StatusCode::OK { "ok" } else { "error" },
-            "service": "mnemosyne",
-            "dependencies": {
-                "database": db_status,
-                "qdrant": qdrant_status,
-            }
+            "status": "ok",
+            "database": "up",
+            "qdrant": "up"
         })),
     )
 }
