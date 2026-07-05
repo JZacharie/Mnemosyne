@@ -5,6 +5,15 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
+fn build_api_url(base: &str, path: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        format!("{}/{}", base, path)
+    } else {
+        format!("{}/v1/{}", base, path)
+    }
+}
+
 pub struct LiteLLMEmbeddingService {
     client: Client,
     api_url: String,
@@ -44,13 +53,7 @@ impl EmbeddingService for LiteLLMEmbeddingService {
     async fn generate_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         debug!("Generating embeddings for {} texts", texts.len());
 
-        let url = if self.api_url.ends_with("/v1") {
-            format!("{}/embeddings", self.api_url)
-        } else if self.api_url.ends_with("/v1/") {
-            format!("{}embeddings", self.api_url)
-        } else {
-            format!("{}/v1/embeddings", self.api_url.trim_end_matches('/'))
-        };
+        let url = build_api_url(&self.api_url, "embeddings");
 
         let response = self
             .client
@@ -127,13 +130,7 @@ struct ChatResponseMessage {
 #[async_trait]
 impl LLMService for LiteLLMTextService {
     async fn generate_text(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
-        let url = if self.api_url.ends_with("/v1") {
-            format!("{}/chat/completions", self.api_url)
-        } else if self.api_url.ends_with("/v1/") {
-            format!("{}chat/completions", self.api_url)
-        } else {
-            format!("{}/v1/chat/completions", self.api_url.trim_end_matches('/'))
-        };
+        let url = build_api_url(&self.api_url, "chat/completions");
 
         let response = self
             .client
@@ -170,5 +167,55 @@ impl LLMService for LiteLLMTextService {
             .ok_or_else(|| anyhow!("No choices returned from LLM"))?;
 
         Ok(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_api_url_plain() {
+        assert_eq!(
+            build_api_url("http://localhost:4000", "embeddings"),
+            "http://localhost:4000/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_with_trailing_slash() {
+        assert_eq!(
+            build_api_url("http://localhost:4000/", "embeddings"),
+            "http://localhost:4000/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_with_v1() {
+        assert_eq!(
+            build_api_url("http://localhost:4000/v1", "embeddings"),
+            "http://localhost:4000/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_with_v1_trailing_slash() {
+        assert_eq!(
+            build_api_url("http://localhost:4000/v1/", "embeddings"),
+            "http://localhost:4000/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_chat_completions() {
+        assert_eq!(
+            build_api_url("http://localhost:4000/v1", "chat/completions"),
+            "http://localhost:4000/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_build_api_url_empty_base() {
+        assert_eq!(build_api_url("", "embeddings"), "/v1/embeddings");
     }
 }

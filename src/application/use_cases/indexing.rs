@@ -239,32 +239,31 @@ impl IndexingUseCase {
 
         let truncated = safe_truncate(content, LLM_TRUNCATION_LIMIT);
 
-        let summary = self
-            .llm_service
-            .generate_text(
-                "You are a precise context summarizer.",
-                &format!(
-                    "Provide a brief 1-2 sentence summary of this document. It will prefix search chunks to provide context.\n\nDocument text:\n{}",
-                    truncated
-                ),
-            )
-            .await
-            .unwrap_or_default();
+        let summary_prompt = format!(
+            "Provide a brief 1-2 sentence summary of this document. It will prefix search chunks to provide context.\n\nDocument text:\n{}",
+            truncated
+        );
+        let meta_prompt = format!(
+            "Extract metadata from this document as JSON with these keys:\n- inferred_tags (list of strings for topics/categories)\n- document_summary (string summary, max 3 sentences)\n- detected_entities (list of key entities mentioned)\n\nDocument text:\n{}",
+            truncated
+        );
 
-        let metadata = self
-            .llm_service
-            .generate_text(
-                "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.",
-                &format!(
-                    "Extract metadata from this document as JSON with these keys:\n- inferred_tags (list of strings for topics/categories)\n- document_summary (string summary, max 3 sentences)\n- detected_entities (list of key entities mentioned)\n\nDocument text:\n{}",
-                    truncated
-                ),
-            )
-            .await
-            .ok()
-            .and_then(|raw| parse_llm_metadata(&raw));
+        let (summary, metadata) = tokio::join!(
+            self.llm_service
+                .generate_text("You are a precise context summarizer.", &summary_prompt,),
+            async {
+                self.llm_service
+                    .generate_text(
+                        "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.",
+                        &meta_prompt,
+                    )
+                    .await
+                    .ok()
+                    .and_then(|raw| parse_llm_metadata(&raw))
+            },
+        );
 
-        (summary, metadata)
+        (summary.unwrap_or_default(), metadata)
     }
 
     async fn generate_embeddings_batched(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>> {
