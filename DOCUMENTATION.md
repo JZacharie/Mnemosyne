@@ -124,7 +124,7 @@ main()
   │
   ├─ AppState ───────────────── État partagé (tous les use cases)
   ├─ Axum Router ─────────────── Routes REST
-  ├─ tokio::spawn HTTP server ── Serveur asynchrone (background)
+  ├─ TcpListener::bind + serve ── Serveur HTTP synchrone (pas de spawn)
   │
   └─ Indexation initiale synchrone
       └─ IndexingUseCase::execute(path) pour chaque --paths
@@ -156,7 +156,6 @@ main()
 | `repositories/qdrant.rs` | `VectorStore` pour Qdrant : création collection, upsert points (avec metadata enrichie), search, health, collection_info |
 | `repositories/file_scanner.rs` | Scan disque via `walkdir`, extraction PDF via `pdf_oxide` (timeout 30s, spawn_blocking), hash SHA256, métadonnées |
 | `repositories/postgres_account.rs` | Implémente 3 traits : `UserRepository`, `AuditRepository`, `PipelineRepository` (CRUD + `get_indexing_stats`) |
-| `repositories/postgres_vector.rs` | Legacy `VectorStore` via pgvector (en migration) |
 | `embedding/tei.rs` | Services TEI : `POST /embed` (embedding) + `POST /rerank` (reranking) |
 | `embedding/litellm.rs` | **Deux services** : `LiteLLMEmbeddingService` (OpenAI-compatible embeddings) + **`LiteLLMTextService`** (chat completion pour enrichissement LLM) |
 
@@ -166,6 +165,7 @@ main()
 |---------|-------------|
 | `auth_handlers.rs` | `POST /api/auth/login` |
 | `query_handlers.rs` | `POST /api/search` |
+| `file_handlers.rs` | `GET /api/file?path=...` (fichier brut), `GET /api/documents/by-path?path=...` (texte extrait) |
 | `pipeline_handlers.rs` | `GET /api/pipeline/runs`, `GET .../:id`, `POST .../retry`, **`GET /api/indexing/stats`** |
 
 ---
@@ -338,18 +338,18 @@ Fonction split_recursive(text, séparateurs, chunk_size, chunk_overlap)
      │ → Retourne 50 candidats           │
      └──────────────┬─────────────────────┘
                     ▼
-     Étape 3: RERANKING
-     ┌────────────────────────────────────┐
-     │ RerankingService::rerank()        │
-     │ → TEI (POST /rerank)              │
-     │   query + 50 textes               │
-     │ → Tri par score descendant        │
-     │ → Garde top 5                     │
-     │ → Retourne DocumentChunk[]        │
-     └──────────────┬─────────────────────┘
-                    ▼
-          Réponse JSON: results[]
-          { content, source, score }
+      Étape 3: RERANKING
+      ┌────────────────────────────────────┐
+      │ RerankingService::rerank()        │
+      │ → TEI (POST /rerank)              │
+      │   query + 50 textes               │
+      │ → Tri par score descendant        │
+      │ → Garde top 5                     │
+      │ → Retourne DocumentChunk[]        │
+      └──────────────┬─────────────────────┘
+                     ▼
+           Réponse JSON: results[]
+           { content, source, source_path, score }
 ```
 
 ---
@@ -427,6 +427,7 @@ Réponse (200) :
     {
       "content": "Document: doc.pdf\nContext: Ce document traite de...\nChunk Content: ...",
       "source": "doc.pdf",
+      "source_path": "/data/nfs/rapports/doc.pdf",
       "score": 0.95
     }
   ]
@@ -512,7 +513,24 @@ Réponse (202) :
 
 La ré-indexation s'exécute en arrière-plan via `tokio::spawn`.
 
+### 7.7 Fichiers & Documents
+
+```
+GET /api/file?path=/data/nfs/rapports/doc.pdf
+```
+
+Retourne le fichier brut avec le bon MIME type (`application/pdf`, `text/plain`, etc.).  
+Le chemin est validé contre les racines NFS autorisées — toute tentative de traversal est refusée (403).
+
+```
+GET /api/documents/by-path?path=/data/nfs/rapports/doc.pdf
+```
+
+Retourne la `PipelineRun` correspondante (incluant `extracted_text`, `chunks`, métadonnées d'indexation).
+
 ---
+
+
 
 ## 8. Base de données
 
@@ -619,10 +637,11 @@ L'interface web se trouve dans `ui/` et est servie par un conteneur nginx sépar
 
 | Fonction | Description |
 |----------|-------------|
-| **Recherche** | Barre de recherche avec résultats enrichis (score %, source) |
+| **Recherche** | Barre de recherche avec résultats enrichis (score %, source, source_path) |
 | **Synthèse AI** | Bouton flottant → interroge Ollama avec les résultats comme contexte |
 | **Pipeline Monitor** | Tableau des runs d'indexation (statuts, étapes, OCR, chunks) |
 | **Détail d'une run** | Panneau latéral : métadonnées, timeline visuelle (5 étapes), texte extrait, chunks |
+| **View PDF / View File** | Bouton sur chaque résultat de recherche, ligne du pipeline, et drawer détail — ouvre le fichier original dans un nouvel onglet |
 | **Correction** | Ré-indexation avec chunk_size/overlap personnalisés ou texte corrigé |
 | **Paramètres** | Configuration URL API Mnemosyne, Ollama URL, modèle |
 
@@ -792,14 +811,14 @@ mnemosyne/
 │   │   ├── repositories/
 │   │   │   ├── file_scanner.rs       # WalkDir + pdf_oxide + SHA256
 │   │   │   ├── qdrant.rs             # Qdrant upsert/search/info
-│   │   │   ├── postgres_account.rs   # User + Audit + Pipeline + Stats
-│   │   │   └── postgres_vector.rs    # Legacy pgvector
+│   │   │   └── postgres_account.rs   # User + Audit + Pipeline + Stats
 │   │   └── embedding/
 │   │       ├── tei.rs                # TEI embed + rerank
 │   │       └── litellm.rs            # LiteLLM embed + LLM text gen
 │   │
 │   └── interfaces/http/
 │       ├── auth_handlers.rs
+│       ├── file_handlers.rs          # File download + document info
 │       ├── query_handlers.rs
 │       └── pipeline_handlers.rs      # Runs + Stats + Retry
 │
@@ -894,7 +913,9 @@ build           cargo build --release
 run             cargo run
 seed            cargo run --bin seed
 test            cargo test
-lint            cargo fmt --check + cargo clippy -- -D warnings
+fmt             cargo fmt
+lint            cargo fmt --check && cargo clippy -- -D warnings
+ci              ./local-ci.sh
 docker-build    docker build -t mnemosyne:latest .
 clean           cargo clean
 ```
@@ -968,6 +989,14 @@ Stack : Python 3.11, LangChain, LiteLLM, pgvector, Rich (barres de progression).
 
 ### v0.1.2 (2025-07-05)
 
+#### 🚀 Nouvelles fonctionnalités
+
+- **Lecture PDF depuis l'interface** :
+  - Nouveau endpoint `GET /api/file?path=...` — sert le fichier brut avec MIME type, validation anti-traversal
+  - Nouveau endpoint `GET /api/documents/by-path?path=...` — retourne la PipelineRun (texte extrait, chunks)
+  - Champ `source_path` ajouté à `QueryResult` dans les réponses de recherche
+  - Boutons "View PDF" / "View File" dans les résultats de recherche, le pipeline monitor, et le drawer détail
+
 #### 🔧 Refactoring & Qualité
 
 - **Découpage de `process_file_internal`** : extraction de `extract_content()`, `enrich_with_llm()`, `generate_embeddings_batched()` — orchestration réduite de 120 à 40 lignes
@@ -988,6 +1017,20 @@ Stack : Python 3.11, LangChain, LiteLLM, pgvector, Rich (barres de progression).
   - `safe_truncate` : ascii, unicode boundary, empty
   - Retrieval : empty results, embedding fail, no embedding, rerank fail, multi-résultats
   - `build_api_url` : plain, trailing slash, `/v1`, `/v1/`, chat completions, empty
+
+#### 🐛 Corrections
+
+- **TEI HTTP client** : `unwrap_or_default()` → `expect()` — le démarrage échoue maintenant clairement si le client ne peut pas être construit (au lieu de perdre timeout/http1_only en silence)
+- **Erreur serveur silencieuse** : le `tokio::spawn` autour du TCP bind a été retiré — un bind raté fait maintenant crash le process avec code d'erreur au lieu d'exit 0
+- **Variable non initialisée** : `results_count: i32` déclarée sans valeur dans `search_handler` → remplacée par `let (response, results_count) = match ...`
+- **`use futures::StreamExt`** : déplacé du corps de fonction au niveau module
+- **`pylos_url` cloné 4×** : réduit à 0 clones via `ref` et `as_deref()`
+
+#### 🧹 Ménage
+
+- **`postgres_vector.rs`** : supprimé du module tree — legacy pgvector jamais utilisé depuis la migration vers Qdrant
+- **`Makefile`** : cibles `fmt` et `ci` ajoutées
+- **`Dockerfile`** : `apt-get install` déplacé avant `cargo chef cook` (correction du cache), packages `-dev` retirés du runtime (allègement ~150 MB)
 
 ### v0.1.0 (2025-05-16)
 
