@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::path::Path;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
 pub struct FileRequest {
@@ -47,6 +47,31 @@ pub async fn get_file_handler(
             (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "File not found"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn get_document_by_path_handler(
+    State(state): State<AppState>,
+    Query(params): Query<FileRequest>,
+) -> impl IntoResponse {
+    match state.pipeline_repo.get_run_by_file_path(&params.path).await {
+        Ok(Some(run)) => {
+            info!("Document info retrieved: {}", params.path);
+            Json(run).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Document not found"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("Failed to get document for {}: {}", params.path, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
             )
                 .into_response()
         }

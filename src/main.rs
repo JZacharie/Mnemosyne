@@ -17,7 +17,7 @@ use mnemosyne::infrastructure::repositories::file_scanner::LocalFileScanner;
 use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRepository;
 use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
 use mnemosyne::interfaces::http::auth_handlers::login_handler;
-use mnemosyne::interfaces::http::file_handlers::get_file_handler;
+use mnemosyne::interfaces::http::file_handlers::{get_document_by_path_handler, get_file_handler};
 use mnemosyne::interfaces::http::pipeline_handlers::{
     get_run_handler, indexing_stats_handler, list_runs_handler, retry_run_handler,
 };
@@ -207,6 +207,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/pipeline/retry", post(retry_run_handler))
         .route("/api/file", axum::routing::get(get_file_handler))
+        .route(
+            "/api/documents/by-path",
+            axum::routing::get(get_document_by_path_handler),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
