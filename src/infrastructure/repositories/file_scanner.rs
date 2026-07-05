@@ -20,63 +20,67 @@ impl LocalFileScanner {
 #[async_trait]
 impl FileScanner for LocalFileScanner {
     async fn scan_directory(&self, path: &str) -> Result<Vec<String>> {
-        let mut files = Vec::new();
-        let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            if e.depth() == 1
-                && [
-                    "photos",
-                    "backup photo",
-                    "photoprism",
-                    "3d",
-                    "videos de familles",
-                    "dcim2",
-                    "apps",
+        let path_str = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut files = Vec::new();
+            let walker = WalkDir::new(&path_str).into_iter().filter_entry(|e| {
+                let name = e.file_name().to_string_lossy().to_lowercase();
+                if e.depth() == 1
+                    && [
+                        "photos",
+                        "backup photo",
+                        "photoprism",
+                        "3d",
+                        "videos de familles",
+                        "dcim2",
+                        "apps",
+                    ]
+                    .contains(&name.as_str())
+                {
+                    return false;
+                }
+                ![
+                    "node_modules",
+                    "vendor",
+                    "target",
+                    ".git",
+                    ".cache",
+                    "bundle",
+                    "tmp",
+                    "temp",
+                    "dist",
+                    ".github",
+                    "07_development",
+                    "git",
+                    ".terraform",
+                    "gems",
+                    "lib",
+                    "bin",
+                    "obj",
+                    "build",
+                    "deps",
+                    "packages",
+                    "add-ons",
+                    "licenses",
+                    "test",
+                    "tests",
                 ]
                 .contains(&name.as_str())
-            {
-                return false;
-            }
-            ![
-                "node_modules",
-                "vendor",
-                "target",
-                ".git",
-                ".cache",
-                "bundle",
-                "tmp",
-                "temp",
-                "dist",
-                ".github",
-                "07_development",
-                "git",
-                ".terraform",
-                "gems",
-                "lib",
-                "bin",
-                "obj",
-                "build",
-                "deps",
-                "packages",
-                "add-ons",
-                "licenses",
-                "test",
-                "tests",
-            ]
-            .contains(&name.as_str())
-        });
+            });
 
-        for entry in walker.filter_map(|e| e.ok()) {
-            if entry.file_type().is_file() {
-                if let Some(ext) = entry.path().extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if ["pdf", "md", "txt", "log"].contains(&ext_str.as_str()) {
-                        files.push(entry.path().to_string_lossy().to_string());
+            for entry in walker.filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    if let Some(ext) = entry.path().extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        if ["pdf", "md", "txt", "log"].contains(&ext_str.as_str()) {
+                            files.push(entry.path().to_string_lossy().to_string());
+                        }
                     }
                 }
             }
-        }
-        Ok(files)
+            Ok(files)
+        })
+        .await?
     }
 
     async fn load_document(&self, file_path: &str) -> Result<Document> {
