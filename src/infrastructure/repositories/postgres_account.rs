@@ -3,7 +3,7 @@ use crate::domain::ports::{AuditRepository, PipelineRepository, UserRepository};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::{postgres::PgRow, PgPool, Row};
 use uuid::Uuid;
 
 pub struct PostgresAccountRepository {
@@ -98,6 +98,25 @@ impl AuditRepository for PostgresAccountRepository {
     }
 }
 
+fn row_to_run(row: &PgRow) -> PipelineRun {
+    PipelineRun {
+        id: row.get("id"),
+        file_path: row.get("file_path"),
+        file_name: row.get("file_name"),
+        file_size: row.get("file_size"),
+        status: row.get("status"),
+        current_step: row.get("current_step"),
+        ocr_status: row.get("ocr_status"),
+        error_message: row.get("error_message"),
+        chunks_count: row.get("chunks_count"),
+        extracted_text: row.get("extracted_text"),
+        chunks: row.get("chunks"),
+        started_at: row.get("started_at"),
+        completed_at: row.get("completed_at"),
+        parameters: row.get("parameters"),
+    }
+}
+
 #[async_trait]
 impl PipelineRepository for PostgresAccountRepository {
     async fn create_run(&self, run: PipelineRun) -> Result<()> {
@@ -154,25 +173,7 @@ impl PipelineRepository for PostgresAccountRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        match row {
-            Some(row) => Ok(Some(PipelineRun {
-                id: row.get("id"),
-                file_path: row.get("file_path"),
-                file_name: row.get("file_name"),
-                file_size: row.get("file_size"),
-                status: row.get("status"),
-                current_step: row.get("current_step"),
-                ocr_status: row.get("ocr_status"),
-                error_message: row.get("error_message"),
-                chunks_count: row.get("chunks_count"),
-                extracted_text: row.get("extracted_text"),
-                chunks: row.get("chunks"),
-                started_at: row.get("started_at"),
-                completed_at: row.get("completed_at"),
-                parameters: row.get("parameters"),
-            })),
-            None => Ok(None),
-        }
+        Ok(row.as_ref().map(row_to_run))
     }
 
     async fn get_run_by_file_path(&self, file_path: &str) -> Result<Option<PipelineRun>> {
@@ -184,25 +185,7 @@ impl PipelineRepository for PostgresAccountRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        match row {
-            Some(row) => Ok(Some(PipelineRun {
-                id: row.get("id"),
-                file_path: row.get("file_path"),
-                file_name: row.get("file_name"),
-                file_size: row.get("file_size"),
-                status: row.get("status"),
-                current_step: row.get("current_step"),
-                ocr_status: row.get("ocr_status"),
-                error_message: row.get("error_message"),
-                chunks_count: row.get("chunks_count"),
-                extracted_text: row.get("extracted_text"),
-                chunks: row.get("chunks"),
-                started_at: row.get("started_at"),
-                completed_at: row.get("completed_at"),
-                parameters: row.get("parameters"),
-            })),
-            None => Ok(None),
-        }
+        Ok(row.as_ref().map(row_to_run))
     }
 
     async fn list_runs(&self) -> Result<Vec<PipelineRun>> {
@@ -213,27 +196,7 @@ impl PipelineRepository for PostgresAccountRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        let runs = rows
-            .into_iter()
-            .map(|row| PipelineRun {
-                id: row.get("id"),
-                file_path: row.get("file_path"),
-                file_name: row.get("file_name"),
-                file_size: row.get("file_size"),
-                status: row.get("status"),
-                current_step: row.get("current_step"),
-                ocr_status: row.get("ocr_status"),
-                error_message: row.get("error_message"),
-                chunks_count: row.get("chunks_count"),
-                extracted_text: row.get("extracted_text"),
-                chunks: row.get("chunks"),
-                started_at: row.get("started_at"),
-                completed_at: row.get("completed_at"),
-                parameters: row.get("parameters"),
-            })
-            .collect();
-
-        Ok(runs)
+        Ok(rows.iter().map(row_to_run).collect())
     }
 
     async fn get_indexing_stats(&self) -> Result<Value> {
