@@ -220,17 +220,26 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     // Run initial indexing for each path
-    for path in &args.paths {
-        if let Err(e) = indexing_use_case.execute(path, &args.collection_name).await {
-            error!("Error indexing path {}: {}", path, e);
-        }
-    }
-
-    info!("✨ Initial indexing job complete!");
-
     if args.oneshot {
+        for path in &args.paths {
+            if let Err(e) = indexing_use_case.execute(path, &args.collection_name).await {
+                error!("Error indexing path {}: {}", path, e);
+            }
+        }
         info!("🛑 Oneshot mode enabled, exiting...");
         return Ok(());
+    } else {
+        let indexing_clone = indexing_use_case.clone();
+        let paths_clone = args.paths.clone();
+        let collection_clone = args.collection_name.clone();
+        tokio::spawn(async move {
+            for path in paths_clone {
+                if let Err(e) = indexing_clone.execute(&path, &collection_clone).await {
+                    error!("Error indexing path {}: {}", path, e);
+                }
+            }
+            info!("✨ Initial indexing job complete!");
+        });
     }
 
     // Start HTTP server
