@@ -10,6 +10,47 @@ use qdrant_client::Qdrant;
 use std::collections::HashMap;
 use tracing::{debug, info};
 
+fn get_str(payload: &HashMap<String, QdrantValue>, key: &str) -> String {
+    payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+fn get_i64(payload: &HashMap<String, QdrantValue>, key: &str) -> i64 {
+    payload.get(key).and_then(|v| v.as_integer()).unwrap_or(0)
+}
+
+fn get_str_list(payload: &HashMap<String, QdrantValue>, key: &str) -> Vec<String> {
+    payload
+        .get(key)
+        .and_then(|v| v.as_list())
+        .map(|list| {
+            list.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn get_optional_str(payload: &HashMap<String, QdrantValue>, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn get_optional_str_list(payload: &HashMap<String, QdrantValue>, key: &str) -> Option<Vec<String>> {
+    payload.get(key).and_then(|v| v.as_list()).map(|list| {
+        list.iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.to_string())
+            .collect()
+    })
+}
+
 pub struct QdrantVectorStore {
     client: Qdrant,
 }
@@ -27,8 +68,8 @@ impl QdrantVectorStore {
                 .create_collection(
                     CreateCollectionBuilder::new(collection_name)
                         .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
-                        .shard_number(3)
-                        .replication_factor(2)
+                        .shard_number(1)
+                        .replication_factor(1)
                         .on_disk_payload(true),
                 )
                 .await?;
@@ -140,81 +181,22 @@ impl VectorStore for QdrantVectorStore {
         for point in search_result.result {
             let payload = point.payload;
 
-            let content = payload
-                .get("content")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-
             let metadata = DocumentMetadata {
-                source_path: payload
-                    .get("source_path")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-                file_name: payload
-                    .get("file_name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-                pvc_name: payload
-                    .get("pvc_name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-                file_size: payload
-                    .get("file_size")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(0) as u64,
-                last_modified: payload
-                    .get("last_modified")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(0),
-                creation_date: payload
-                    .get("creation_date")
-                    .and_then(|v| v.as_integer())
-                    .unwrap_or(0),
-                file_hash: payload
-                    .get("file_hash")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
-                folder_tags: payload
-                    .get("folder_tags")
-                    .and_then(|v| v.as_list())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| s.to_string())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                inferred_tags: payload
-                    .get("inferred_tags")
-                    .and_then(|v| v.as_list())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| s.to_string())
-                            .collect()
-                    }),
-                document_summary: payload
-                    .get("document_summary")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                detected_entities: payload
-                    .get("detected_entities")
-                    .and_then(|v| v.as_list())
-                    .map(|list| {
-                        list.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| s.to_string())
-                            .collect()
-                    }),
+                source_path: get_str(&payload, "source_path"),
+                file_name: get_str(&payload, "file_name"),
+                pvc_name: get_str(&payload, "pvc_name"),
+                file_size: get_i64(&payload, "file_size") as u64,
+                last_modified: get_i64(&payload, "last_modified"),
+                creation_date: get_i64(&payload, "creation_date"),
+                file_hash: get_str(&payload, "file_hash"),
+                folder_tags: get_str_list(&payload, "folder_tags"),
+                inferred_tags: get_optional_str_list(&payload, "inferred_tags"),
+                document_summary: get_optional_str(&payload, "document_summary"),
+                detected_entities: get_optional_str_list(&payload, "detected_entities"),
             };
 
             chunks.push(DocumentChunk {
-                content,
+                content: get_str(&payload, "content"),
                 metadata,
                 embedding: None,
                 score: Some(point.score),
