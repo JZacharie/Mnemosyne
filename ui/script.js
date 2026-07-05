@@ -212,12 +212,25 @@ async function loadPipelineRuns() {
       tdTime.textContent = new Date(run.started_at).toLocaleString();
 
       const tdActions = document.createElement('td');
+      tdActions.style.display = 'flex';
+      tdActions.style.gap = '0.35rem';
+
       const btnInspect = document.createElement('button');
       btnInspect.className = 'btn-ai';
       btnInspect.style.padding = '0.25rem 0.75rem';
       btnInspect.textContent = 'Inspect';
       btnInspect.addEventListener('click', () => showRunDetails(run.id));
       tdActions.appendChild(btnInspect);
+
+      const btnViewFile = document.createElement('a');
+      btnViewFile.className = 'btn-view-file';
+      btnViewFile.style.padding = '0.25rem 0.75rem';
+      btnViewFile.style.fontSize = '0.8rem';
+      btnViewFile.style.textDecoration = 'none';
+      btnViewFile.href = `${state.mnemosyneUrl}/api/file?path=${encodeURIComponent(run.file_path)}`;
+      btnViewFile.target = '_blank';
+      btnViewFile.textContent = 'View';
+      tdActions.appendChild(btnViewFile);
 
       tr.appendChild(tdName);
       tr.appendChild(tdStatus);
@@ -260,6 +273,9 @@ async function showRunDetails(runId) {
 
     document.getElementById('drawerTitle').textContent = run.file_name;
     document.getElementById('runFilePath').textContent = run.file_path;
+    const viewLink = document.getElementById('runFileViewLink');
+    viewLink.href = `${state.mnemosyneUrl}/api/file?path=${encodeURIComponent(run.file_path)}`;
+    viewLink.style.display = 'inline-flex';
     document.getElementById('runFileSize').textContent = formatBytes(run.file_size);
     document.getElementById('runStartedAt').textContent = new Date(run.started_at).toLocaleString();
     document.getElementById('runCompletedAt').textContent = run.completed_at ? new Date(run.completed_at).toLocaleString() : 'In Progress';
