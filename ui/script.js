@@ -6,8 +6,8 @@ if (savedMnemosyneUrl && (savedMnemosyneUrl.includes('.local') || savedMnemosyne
 
 const state = {
   mnemosyneUrl: localStorage.getItem('mnemosyneUrl') || 'http://localhost:8080',
-  ollamaUrl: localStorage.getItem('ollamaUrl') || 'http://localhost:11434',
-  ollamaModel: localStorage.getItem('ollamaModel') || 'llama3',
+  ollamaUrl: localStorage.getItem('ollamaUrl') || 'http://192.168.0.58:11434',
+  ollamaModel: localStorage.getItem('ollamaModel') || 'llama3.1:8b',
   results: []
 };
 
