@@ -1,4 +1,4 @@
-use crate::domain::entities::{DocumentChunk, PipelineRun};
+use crate::domain::entities::{Document, DocumentChunk, PipelineRun};
 use crate::domain::ports::{
     EmbeddingService, FileScanner, LLMService, PipelineRepository, VectorStore,
 };
@@ -9,6 +9,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
+
+const EMBEDDING_BATCH_SIZE: usize = 32;
+const LLM_TRUNCATION_LIMIT: usize = 10000;
+const FILE_SCAN_CONCURRENCY: usize = 8;
 
 #[derive(Clone)]
 pub struct IndexingUseCase {
@@ -42,7 +46,6 @@ impl IndexingUseCase {
         let file_paths = self.file_scanner.scan_directory(path).await?;
         info!("Found {} files to process", file_paths.len());
 
-        let concurrency = 8; // Process 8 files in parallel
         let collection_name = collection_name.to_string();
 
         futures::stream::iter(file_paths)
@@ -56,7 +59,7 @@ impl IndexingUseCase {
                     }
                 }
             })
-            .buffer_unordered(concurrency)
+            .buffer_unordered(FILE_SCAN_CONCURRENCY)
             .collect::<Vec<()>>()
             .await;
 
@@ -85,7 +88,6 @@ impl IndexingUseCase {
         let metadata = std::fs::metadata(file_path);
         let file_size = metadata.map(|m| m.len() as i64).unwrap_or(0);
 
-        // Check if a run already exists for this file
         let run_id = match self.pipeline_repo.get_run_by_file_path(file_path).await {
             Ok(Some(existing)) => existing.id,
             _ => Uuid::new_v4(),
@@ -110,17 +112,16 @@ impl IndexingUseCase {
             chunks: None,
             started_at: Utc::now(),
             completed_at: None,
-            parameters: Some(parameters.clone()),
+            parameters: Some(parameters),
         };
 
-        // Create or update starting run
         if let Ok(Some(_)) = self.pipeline_repo.get_run(run_id).await {
             let _ = self.pipeline_repo.update_run(run.clone()).await;
         } else {
             let _ = self.pipeline_repo.create_run(run.clone()).await;
         }
 
-        match self
+        let result = self
             .process_file_internal(
                 file_path,
                 collection_name,
@@ -129,8 +130,9 @@ impl IndexingUseCase {
                 custom_text,
                 &mut run,
             )
-            .await
-        {
+            .await;
+
+        match result {
             Ok(_) => {
                 run.status = "COMPLETED".to_string();
                 run.current_step = "COMPLETE".to_string();
@@ -159,100 +161,32 @@ impl IndexingUseCase {
         custom_text: Option<String>,
         run: &mut PipelineRun,
     ) -> Result<()> {
-        // Step 1: Content Extraction / OCR
-        let doc = if let Some(text) = custom_text {
-            // If custom text was provided for correction
-            run.ocr_status = "NONE".to_string();
-            let mut temp_doc = self.file_scanner.load_document(file_path).await?;
-            temp_doc.content = text;
-            temp_doc
-        } else {
-            let doc = self.file_scanner.load_document(file_path).await?;
-            if file_path.to_lowercase().ends_with(".pdf") {
-                if doc.content.contains("[OCR PENDING]")
-                    || doc.content.contains("[ERROR]")
-                    || doc.content.contains("[TIMEOUT]")
-                {
-                    run.ocr_status = "FAILED".to_string();
-                } else {
-                    run.ocr_status = "SUCCESS".to_string();
-                }
-            }
-            doc
-        };
-
-        let mut doc = doc;
-        let mut doc_context = String::new();
-
-        if !doc.content.trim().is_empty() {
-            let truncated_content = safe_truncate(&doc.content, 10000);
-
-            // Call LLM for document summary (context wrapper)
-            let summary_system = "You are a precise context summarizer.";
-            let summary_user = format!(
-                "Provide a brief 1-2 sentence summary of this document. It will prefix search chunks to provide context.\n\nDocument text:\n{}",
-                truncated_content
-            );
-            if let Ok(sum) = self
-                .llm_service
-                .generate_text(summary_system, &summary_user)
-                .await
-            {
-                doc_context = sum;
-            }
-
-            // Call LLM for structured metadata JSON
-            let meta_system = "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.";
-            let meta_user = format!(
-                "Extract metadata from this document as JSON with these keys:\n- inferred_tags (list of strings for topics/categories)\n- document_summary (string summary, max 3 sentences)\n- detected_entities (list of key entities mentioned)\n\nDocument text:\n{}",
-                truncated_content
-            );
-            if let Ok(meta_raw) = self
-                .llm_service
-                .generate_text(meta_system, &meta_user)
-                .await
-            {
-                if let Some(parsed) = parse_llm_metadata(&meta_raw) {
-                    doc.metadata.inferred_tags = parsed.inferred_tags;
-                    doc.metadata.document_summary = parsed.document_summary;
-                    doc.metadata.detected_entities = parsed.detected_entities;
-                }
-            }
+        let mut doc = self.extract_content(file_path, custom_text, run).await?;
+        let (doc_context, llm_meta) = self.enrich_with_llm(&doc.content).await;
+        if let Some(parsed) = llm_meta {
+            doc.metadata.inferred_tags = parsed.inferred_tags;
+            doc.metadata.document_summary = parsed.document_summary;
+            doc.metadata.detected_entities = parsed.detected_entities;
         }
 
         run.extracted_text = Some(doc.content.clone());
         run.current_step = "CHUNKING".to_string();
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
-        // Step 2: Chunking logic
-        let chunks_content = split_text(&doc.content, chunk_size, chunk_overlap);
+        let chunks = split_text(&doc.content, chunk_size, chunk_overlap);
+        let enriched_chunks =
+            enrich_chunks_with_context(&chunks, &doc.metadata.file_name, &doc_context);
 
-        // Prepend context summary to each chunk
-        let enriched_chunks = enrich_chunks_with_context(
-            chunks_content.clone(),
-            &doc.metadata.file_name,
-            &doc_context,
-        );
-
-        run.chunks_count = Some(chunks_content.len() as i32);
-        run.chunks = Some(serde_json::to_value(&chunks_content).unwrap_or(serde_json::Value::Null));
+        run.chunks_count = Some(chunks.len() as i32);
+        run.chunks = Some(serde_json::to_value(&chunks).unwrap_or(serde_json::Value::Null));
         run.current_step = "EMBEDDING".to_string();
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
-        // Step 3: Embeddings
-        let mut embeddings = Vec::new();
-        for batch in enriched_chunks.chunks(32) {
-            let batch_embeddings = self
-                .embedding_service
-                .generate_embeddings(batch.to_vec())
-                .await?;
-            embeddings.extend(batch_embeddings);
-        }
+        let embeddings = self.generate_embeddings_batched(&enriched_chunks).await?;
 
         run.current_step = "STORING".to_string();
         let _ = self.pipeline_repo.update_run(run.clone()).await;
 
-        // Step 4: Save to vector database
         let doc_chunks: Vec<DocumentChunk> = enriched_chunks
             .into_iter()
             .zip(embeddings)
@@ -269,6 +203,80 @@ impl IndexingUseCase {
             .await?;
 
         Ok(())
+    }
+
+    async fn extract_content(
+        &self,
+        file_path: &str,
+        custom_text: Option<String>,
+        run: &mut PipelineRun,
+    ) -> Result<Document> {
+        if let Some(text) = custom_text {
+            run.ocr_status = "NONE".to_string();
+            let mut doc = self.file_scanner.load_document(file_path).await?;
+            doc.content = text;
+            Ok(doc)
+        } else {
+            let doc = self.file_scanner.load_document(file_path).await?;
+            if file_path.to_lowercase().ends_with(".pdf") {
+                if doc.content.contains("[OCR PENDING]")
+                    || doc.content.contains("[ERROR]")
+                    || doc.content.contains("[TIMEOUT]")
+                {
+                    run.ocr_status = "FAILED".to_string();
+                } else {
+                    run.ocr_status = "SUCCESS".to_string();
+                }
+            }
+            Ok(doc)
+        }
+    }
+
+    async fn enrich_with_llm(&self, content: &str) -> (String, Option<LlmMetadata>) {
+        if content.trim().is_empty() {
+            return (String::new(), None);
+        }
+
+        let truncated = safe_truncate(content, LLM_TRUNCATION_LIMIT);
+
+        let summary = self
+            .llm_service
+            .generate_text(
+                "You are a precise context summarizer.",
+                &format!(
+                    "Provide a brief 1-2 sentence summary of this document. It will prefix search chunks to provide context.\n\nDocument text:\n{}",
+                    truncated
+                ),
+            )
+            .await
+            .unwrap_or_default();
+
+        let metadata = self
+            .llm_service
+            .generate_text(
+                "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.",
+                &format!(
+                    "Extract metadata from this document as JSON with these keys:\n- inferred_tags (list of strings for topics/categories)\n- document_summary (string summary, max 3 sentences)\n- detected_entities (list of key entities mentioned)\n\nDocument text:\n{}",
+                    truncated
+                ),
+            )
+            .await
+            .ok()
+            .and_then(|raw| parse_llm_metadata(&raw));
+
+        (summary, metadata)
+    }
+
+    async fn generate_embeddings_batched(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>> {
+        let mut embeddings = Vec::with_capacity(chunks.len());
+        for batch in chunks.chunks(EMBEDDING_BATCH_SIZE) {
+            let batch_embeddings = self
+                .embedding_service
+                .generate_embeddings(batch.to_vec())
+                .await?;
+            embeddings.extend(batch_embeddings);
+        }
+        Ok(embeddings)
     }
 }
 
@@ -291,9 +299,9 @@ struct LlmMetadata {
     detected_entities: Option<Vec<String>>,
 }
 
-fn enrich_chunks_with_context(chunks: Vec<String>, file_name: &str, context: &str) -> Vec<String> {
+fn enrich_chunks_with_context(chunks: &[String], file_name: &str, context: &str) -> Vec<String> {
     if context.is_empty() {
-        return chunks;
+        return chunks.to_vec();
     }
     chunks
         .iter()
@@ -539,7 +547,7 @@ mod tests {
     #[test]
     fn test_enrich_chunks_with_context() {
         let chunks = vec!["chunk1".to_string(), "chunk2".to_string()];
-        let result = enrich_chunks_with_context(chunks, "doc.md", "summary text");
+        let result = enrich_chunks_with_context(&chunks, "doc.md", "summary text");
         assert_eq!(result.len(), 2);
         assert_eq!(
             result[0],
@@ -554,13 +562,13 @@ mod tests {
     #[test]
     fn test_enrich_chunks_empty_context() {
         let chunks = vec!["chunk1".to_string()];
-        let result = enrich_chunks_with_context(chunks.clone(), "doc.md", "");
+        let result = enrich_chunks_with_context(&chunks, "doc.md", "");
         assert_eq!(result, chunks);
     }
 
     #[test]
     fn test_enrich_chunks_empty_chunks() {
-        let result = enrich_chunks_with_context(vec![], "doc.md", "context");
+        let result = enrich_chunks_with_context(&[], "doc.md", "context");
         assert!(result.is_empty());
     }
 
@@ -568,7 +576,7 @@ mod tests {
     fn test_enrich_chunks_special_chars() {
         let chunks = vec!["line1\nline2".to_string()];
         let result =
-            enrich_chunks_with_context(chunks, "fichier spécial.md", "contexte avec émoji");
+            enrich_chunks_with_context(&chunks, "fichier spécial.md", "contexte avec émoji");
         assert_eq!(
             result[0],
             "Document: fichier spécial.md\nContext: contexte avec émoji\nChunk Content: line1\nline2"

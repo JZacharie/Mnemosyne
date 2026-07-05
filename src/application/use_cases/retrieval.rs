@@ -92,50 +92,174 @@ mod tests {
         }
     }
 
+    fn make_doc(content: &str, score: f32) -> DocumentChunk {
+        DocumentChunk {
+            content: content.to_string(),
+            metadata: DocumentMetadata {
+                source_path: format!("path/{}", content),
+                file_name: content.to_string(),
+                pvc_name: "pvc".to_string(),
+                file_size: 100,
+                last_modified: 0,
+                creation_date: 0,
+                file_hash: "hash".to_string(),
+                folder_tags: vec![],
+                inferred_tags: None,
+                document_summary: None,
+                detected_entities: None,
+            },
+            embedding: None,
+            score: Some(score),
+        }
+    }
+
     #[tokio::test]
     async fn test_retrieval_pipeline() {
         let mut mock_vs = MockVectorStoreImpl::new();
         let mut mock_es = MockEmbeddingServiceImpl::new();
         let mut mock_rs = MockRerankingServiceImpl::new();
 
-        let query = "test query";
-        let collection = "test_col";
-
-        // Mock embedding
         mock_es
             .expect_generate_embeddings()
             .returning(|_| Ok(vec![vec![0.1, 0.2]]));
 
-        // Mock search
-        mock_vs.expect_search().returning(|_, _, _, _| {
-            Ok(vec![DocumentChunk {
-                content: "doc1".to_string(),
-                metadata: DocumentMetadata {
-                    source_path: "p1".to_string(),
-                    file_name: "f1".to_string(),
-                    pvc_name: "pvc1".to_string(),
-                    file_size: 100,
-                    last_modified: 0,
-                    creation_date: 0,
-                    file_hash: "hash".to_string(),
-                    folder_tags: vec![],
-                    inferred_tags: None,
-                    document_summary: None,
-                    detected_entities: None,
-                },
-                embedding: None,
-                score: Some(0.8),
-            }])
-        });
+        mock_vs
+            .expect_search()
+            .returning(|_, _, _, _| Ok(vec![make_doc("doc1", 0.8)]));
 
-        // Mock rerank
         mock_rs.expect_rerank().returning(|_, docs, _| Ok(docs));
 
         let use_case =
             RetrievalUseCase::new(Arc::new(mock_vs), Arc::new(mock_es), Arc::new(mock_rs));
 
-        let results = use_case.execute(query, collection).await.unwrap();
+        let results = use_case.execute("query", "col").await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].content, "doc1");
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_empty_results() {
+        let mut mock_vs = MockVectorStoreImpl::new();
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        let mut mock_rs = MockRerankingServiceImpl::new();
+
+        mock_es
+            .expect_generate_embeddings()
+            .returning(|_| Ok(vec![vec![0.1, 0.2]]));
+
+        mock_vs.expect_search().returning(|_, _, _, _| Ok(vec![]));
+
+        // rerank should NOT be called when vector store returns empty
+        mock_rs.expect_rerank().never();
+
+        let use_case =
+            RetrievalUseCase::new(Arc::new(mock_vs), Arc::new(mock_es), Arc::new(mock_rs));
+
+        let results = use_case.execute("query", "col").await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_embedding_failure() {
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        mock_es
+            .expect_generate_embeddings()
+            .returning(|_| Err(anyhow::anyhow!("Embedding service unavailable")));
+
+        let use_case = RetrievalUseCase::new(
+            Arc::new(MockVectorStoreImpl::new()),
+            Arc::new(mock_es),
+            Arc::new(MockRerankingServiceImpl::new()),
+        );
+
+        let result = use_case.execute("query", "col").await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Embedding service unavailable"));
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_no_embedding_generated() {
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        mock_es
+            .expect_generate_embeddings()
+            .returning(|_| Ok(vec![]));
+
+        let use_case = RetrievalUseCase::new(
+            Arc::new(MockVectorStoreImpl::new()),
+            Arc::new(mock_es),
+            Arc::new(MockRerankingServiceImpl::new()),
+        );
+
+        let result = use_case.execute("query", "col").await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No embedding generated"));
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_rerank_failure() {
+        let mut mock_vs = MockVectorStoreImpl::new();
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        let mut mock_rs = MockRerankingServiceImpl::new();
+
+        mock_es
+            .expect_generate_embeddings()
+            .returning(|_| Ok(vec![vec![0.1, 0.2]]));
+
+        mock_vs
+            .expect_search()
+            .returning(|_, _, _, _| Ok(vec![make_doc("doc1", 0.8)]));
+
+        mock_rs
+            .expect_rerank()
+            .returning(|_, _, _| Err(anyhow::anyhow!("Reranker unavailable")));
+
+        let use_case =
+            RetrievalUseCase::new(Arc::new(mock_vs), Arc::new(mock_es), Arc::new(mock_rs));
+
+        let result = use_case.execute("query", "col").await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Reranker unavailable"));
+    }
+
+    #[tokio::test]
+    async fn test_retrieval_multiple_results_reranked() {
+        let mut mock_vs = MockVectorStoreImpl::new();
+        let mut mock_es = MockEmbeddingServiceImpl::new();
+        let mut mock_rs = MockRerankingServiceImpl::new();
+
+        mock_es
+            .expect_generate_embeddings()
+            .returning(|_| Ok(vec![vec![0.1, 0.2]]));
+
+        mock_vs.expect_search().returning(|_, _, _, _| {
+            Ok(vec![
+                make_doc("a", 0.5),
+                make_doc("b", 0.7),
+                make_doc("c", 0.3),
+            ])
+        });
+
+        mock_rs
+            .expect_rerank()
+            .withf(|_, docs, top_n| docs.len() == 3 && *top_n == 5)
+            .returning(|_, mut docs, _| {
+                docs.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+                Ok(docs)
+            });
+
+        let use_case =
+            RetrievalUseCase::new(Arc::new(mock_vs), Arc::new(mock_es), Arc::new(mock_rs));
+
+        let results = use_case.execute("query", "col").await.unwrap();
+        assert_eq!(results.len(), 3);
     }
 }
