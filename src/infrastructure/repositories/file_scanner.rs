@@ -23,6 +23,20 @@ impl FileScanner for LocalFileScanner {
         let mut files = Vec::new();
         let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
             let name = e.file_name().to_string_lossy().to_lowercase();
+            if e.depth() == 1
+                && [
+                    "photos",
+                    "backup photo",
+                    "photoprism",
+                    "3d",
+                    "videos de familles",
+                    "dcim2",
+                    "apps",
+                ]
+                .contains(&name.as_str())
+            {
+                return false;
+            }
             ![
                 "node_modules",
                 "vendor",
