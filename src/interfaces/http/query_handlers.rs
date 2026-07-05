@@ -19,6 +19,7 @@ pub struct QueryResponse {
 pub struct QueryResult {
     pub content: String,
     pub source: String,
+    pub source_path: String,
     pub score: f32,
 }
 
@@ -39,6 +40,7 @@ pub async fn search_handler(
                 .map(|c| QueryResult {
                     content: c.content,
                     source: c.metadata.file_name,
+                    source_path: c.metadata.source_path,
                     score: c.score.unwrap_or(0.0),
                 })
                 .collect();

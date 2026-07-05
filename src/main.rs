@@ -17,6 +17,7 @@ use mnemosyne::infrastructure::repositories::file_scanner::LocalFileScanner;
 use mnemosyne::infrastructure::repositories::postgres_account::PostgresAccountRepository;
 use mnemosyne::infrastructure::repositories::qdrant::QdrantVectorStore;
 use mnemosyne::interfaces::http::auth_handlers::login_handler;
+use mnemosyne::interfaces::http::file_handlers::get_file_handler;
 use mnemosyne::interfaces::http::pipeline_handlers::{
     get_run_handler, indexing_stats_handler, list_runs_handler, retry_run_handler,
 };
@@ -186,6 +187,7 @@ async fn main() -> anyhow::Result<()> {
         db_pool: pool.clone(),
         vector_store: vector_store.clone(),
         ollama_url: args.ollama_url,
+        nfs_paths: args.paths.clone(),
     };
 
     // Build Axum router
@@ -204,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::get(get_run_handler),
         )
         .route("/api/pipeline/retry", post(retry_run_handler))
+        .route("/api/file", axum::routing::get(get_file_handler))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
