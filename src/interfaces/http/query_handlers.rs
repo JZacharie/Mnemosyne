@@ -64,3 +64,43 @@ pub async fn search_handler(
 
     response
 }
+
+pub async fn ollama_generate_proxy_handler(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body_bytes: axum::body::Bytes,
+) -> impl IntoResponse {
+    use futures::StreamExt;
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/generate", state.ollama_url.trim_end_matches('/'));
+
+    let mut req_builder = client.post(&url).body(body_bytes);
+
+    if let Some(ct) = headers.get(axum::http::header::CONTENT_TYPE) {
+        req_builder = req_builder.header(axum::http::header::CONTENT_TYPE, ct);
+    }
+
+    match req_builder.send().await {
+        Ok(res) => {
+            let status = axum::http::StatusCode::from_u16(res.status().as_u16())
+                .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+            let mut res_headers = axum::http::HeaderMap::new();
+            if let Some(ct) = res.headers().get(reqwest::header::CONTENT_TYPE) {
+                if let Ok(val) = axum::http::HeaderValue::from_bytes(ct.as_bytes()) {
+                    res_headers.insert(axum::http::header::CONTENT_TYPE, val);
+                }
+            }
+
+            let stream = res
+                .bytes_stream()
+                .map(|chunk| chunk.map_err(std::io::Error::other));
+
+            (status, res_headers, axum::body::Body::from_stream(stream)).into_response()
+        }
+        Err(e) => (
+            axum::http::StatusCode::BAD_GATEWAY,
+            format!("Ollama proxy error: {}", e),
+        )
+            .into_response(),
+    }
+}

@@ -20,7 +20,7 @@ use mnemosyne::interfaces::http::auth_handlers::login_handler;
 use mnemosyne::interfaces::http::pipeline_handlers::{
     get_run_handler, indexing_stats_handler, list_runs_handler, retry_run_handler,
 };
-use mnemosyne::interfaces::http::query_handlers::search_handler;
+use mnemosyne::interfaces::http::query_handlers::{ollama_generate_proxy_handler, search_handler};
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser, Debug)]
@@ -69,6 +69,9 @@ struct Args {
 
     #[arg(long, env = "PYLOS_API_KEY")]
     pylos_api_key: Option<String>,
+
+    #[arg(long, env = "OLLAMA_URL", default_value = "http://192.168.0.58:11434")]
+    ollama_url: String,
 
     #[arg(long, env = "PVC_NAME", default_value = "unknown")]
     pvc_name: String,
@@ -181,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
         collection_name: args.collection_name.clone(),
         db_pool: pool.clone(),
         vector_store: vector_store.clone(),
+        ollama_url: args.ollama_url,
     };
 
     // Build Axum router
@@ -192,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/auth/login", post(login_handler))
         .route("/api/search", post(search_handler))
+        .route("/api/generate", post(ollama_generate_proxy_handler))
         .route("/api/pipeline/runs", axum::routing::get(list_runs_handler))
         .route(
             "/api/pipeline/runs/:id",

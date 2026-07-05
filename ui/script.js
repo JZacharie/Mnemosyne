@@ -437,7 +437,7 @@ async function synthesizeResults() {
   resultsList.prepend(aiCard);
   
   try {
-    const response = await fetch(`${state.ollamaUrl}/api/generate`, {
+    const response = await fetch(`${state.mnemosyneUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -15,6 +15,7 @@ pub struct AppState {
     pub collection_name: String,
     pub db_pool: sqlx::PgPool,
     pub vector_store: Arc<dyn domain::ports::VectorStore>,
+    pub ollama_url: String,
 }
 
 impl FromRef<AppState> for Arc<application::use_cases::auth::AuthUseCase> {

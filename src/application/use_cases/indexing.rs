@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 const EMBEDDING_BATCH_SIZE: usize = 32;
 const LLM_TRUNCATION_LIMIT: usize = 10000;
-const FILE_SCAN_CONCURRENCY: usize = 8;
+const FILE_SCAN_CONCURRENCY: usize = 1;
 
 #[derive(Clone)]
 pub struct IndexingUseCase {
@@ -53,6 +53,7 @@ impl IndexingUseCase {
                 let this = self.clone();
                 let col_name = collection_name.clone();
                 async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     match this.process_file(&file_path, &col_name).await {
                         Ok(_) => info!("Successfully indexed: {}", file_path),
                         Err(e) => error!("Failed to index {}: {}", file_path, e),
