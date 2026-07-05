@@ -41,9 +41,14 @@ impl IndexingUseCase {
     }
 
     pub async fn execute(&self, path: &str, collection_name: &str) -> Result<()> {
-        info!("Starting indexing process for path: {}", path);
+        let resolved_path = if path == "/mnt/xpool" {
+            "/mnt/xpool/Documents"
+        } else {
+            path
+        };
+        info!("Starting indexing process for path: {}", resolved_path);
 
-        let file_paths = self.file_scanner.scan_directory(path).await?;
+        let file_paths = self.file_scanner.scan_directory(resolved_path).await?;
         info!("Found {} files to process", file_paths.len());
 
         let collection_name = collection_name.to_string();
