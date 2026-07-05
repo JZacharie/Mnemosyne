@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 const EMBEDDING_BATCH_SIZE: usize = 32;
 const LLM_TRUNCATION_LIMIT: usize = 10000;
-const FILE_SCAN_CONCURRENCY: usize = 4;
+const FILE_SCAN_CONCURRENCY: usize = 1;
 
 #[derive(Clone)]
 pub struct IndexingUseCase {
@@ -58,7 +58,7 @@ impl IndexingUseCase {
                 let this = self.clone();
                 let col_name = collection_name.clone();
                 async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                     match this.process_file(&file_path, &col_name).await {
                         Ok(_) => info!("Successfully indexed: {}", file_path),
                         Err(e) => error!("Failed to index {}: {}", file_path, e),
@@ -254,22 +254,25 @@ impl IndexingUseCase {
             truncated
         );
 
-        let (summary, metadata) = tokio::join!(
-            self.llm_service
-                .generate_text("You are a precise context summarizer.", &summary_prompt,),
-            async {
-                self.llm_service
-                    .generate_text(
-                        "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.",
-                        &meta_prompt,
-                    )
-                    .await
-                    .ok()
-                    .and_then(|raw| parse_llm_metadata(&raw))
-            },
-        );
+        let summary = self
+            .llm_service
+            .generate_text("You are a precise context summarizer.", &summary_prompt)
+            .await
+            .unwrap_or_default();
 
-        (summary.unwrap_or_default(), metadata)
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let metadata = self
+            .llm_service
+            .generate_text(
+                "You are a metadata extractor. Output ONLY raw JSON matching the requested schema. No markdown formatting, no prefix/suffix.",
+                &meta_prompt,
+            )
+            .await
+            .ok()
+            .and_then(|raw| parse_llm_metadata(&raw));
+
+        (summary, metadata)
     }
 
     async fn generate_embeddings_batched(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -280,6 +283,7 @@ impl IndexingUseCase {
                 .generate_embeddings(batch.to_vec())
                 .await?;
             embeddings.extend(batch_embeddings);
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         Ok(embeddings)
     }
