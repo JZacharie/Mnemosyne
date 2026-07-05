@@ -121,13 +121,30 @@ function renderResults(results) {
     const rSrcText = document.createTextNode(` ${res.source}`);
     rSrc.appendChild(rSrcText);
 
+    const btnGroup = document.createElement('div');
+    btnGroup.style.display = 'flex';
+    btnGroup.style.gap = '0.5rem';
+
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'btn-view-file';
+    const isPdf = res.source_path && res.source_path.toLowerCase().endsWith('.pdf');
+    viewBtn.innerHTML = isPdf
+      ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg> View PDF`
+      : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg> View File`;
+    viewBtn.addEventListener('click', () => {
+      window.open(`${state.mnemosyneUrl}/api/file?path=${encodeURIComponent(res.source_path)}`, '_blank');
+    });
+
     const rBtn = document.createElement('button');
     rBtn.className = 'btn-ai';
     rBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg> Analyze`;
     rBtn.addEventListener('click', () => askAiAboutThis(index));
 
+    btnGroup.appendChild(viewBtn);
+    btnGroup.appendChild(rBtn);
+
     rFooter.appendChild(rSrc);
-    rFooter.appendChild(rBtn);
+    rFooter.appendChild(btnGroup);
 
     card.appendChild(rHeader);
     card.appendChild(rContent);
