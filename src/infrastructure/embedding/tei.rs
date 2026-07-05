@@ -18,7 +18,7 @@ impl TEIService {
             .http1_only()
             .timeout(std::time::Duration::from_secs(60))
             .build()
-            .unwrap_or_default();
+            .expect("Failed to build TEI HTTP client");
         Self {
             client,
             embedder_url,

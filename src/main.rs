@@ -130,11 +130,11 @@ async fn main() -> anyhow::Result<()> {
         args.tei_reranker_url,
     ));
 
-    let embedding_service: Arc<dyn EmbeddingService> = if let Some(url) = pylos_url.clone() {
+    let embedding_service: Arc<dyn EmbeddingService> = if let Some(ref url) = pylos_url {
         let api_key = pylos_api_key.clone().unwrap_or_default();
         Arc::new(
             mnemosyne::infrastructure::embedding::litellm::LiteLLMEmbeddingService::new(
-                url,
+                url.clone(),
                 api_key,
                 args.embedding_model.clone(),
             ),
@@ -147,9 +147,10 @@ async fn main() -> anyhow::Result<()> {
     let account_repo = Arc::new(PostgresAccountRepository::new(pool.clone()));
 
     let llm_url = pylos_url
-        .clone()
-        .unwrap_or_else(|| "http://litellm.litellm.svc.cluster.local:4000".to_string());
-    let llm_api_key = pylos_api_key.clone().unwrap_or_default();
+        .as_deref()
+        .unwrap_or("http://litellm.litellm.svc.cluster.local:4000")
+        .to_string();
+    let llm_api_key = pylos_api_key.unwrap_or_default();
     let llm_model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "gemini-3-flash".to_string());
     let llm_service = Arc::new(
         mnemosyne::infrastructure::embedding::litellm::LiteLLMTextService::new(
@@ -211,29 +212,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_state(state);
 
-    // Start HTTP server in background
-    let addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
-    info!("🌐 HTTP server listening on {}", addr);
-
-    let server_handle = tokio::spawn(async move {
-        match tokio::net::TcpListener::bind(&addr).await {
-            Ok(listener) => {
-                if let Err(e) = axum::serve(listener, app).await {
-                    error!("Axum server error: {}", e);
-                }
-            }
-            Err(e) => {
-                error!("Failed to bind TCP listener to {}: {}", addr, e);
-            }
-        }
-    });
-
     // Run initial indexing for each path
-    for path in args.paths {
-        if let Err(e) = indexing_use_case
-            .execute(&path, &args.collection_name)
-            .await
-        {
+    for path in &args.paths {
+        if let Err(e) = indexing_use_case.execute(path, &args.collection_name).await {
             error!("Error indexing path {}: {}", path, e);
         }
     }
@@ -245,8 +226,12 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Keep the service running
-    server_handle.await?;
+    // Start HTTP server
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("🌐 HTTP server listening on {}", addr);
+
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::AppState;
 use axum::{extract::State, response::IntoResponse, Json};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use uuid::Uuid;
@@ -26,9 +27,8 @@ pub async fn search_handler(
     Json(payload): Json<QueryRequest>,
 ) -> impl IntoResponse {
     let start = std::time::Instant::now();
-    let results_count: i32;
 
-    let response = match state
+    let (response, results_count) = match state
         .retrieval_use_case
         .execute(&payload.query, &state.collection_name)
         .await
@@ -42,17 +42,19 @@ pub async fn search_handler(
                     score: c.score.unwrap_or(0.0),
                 })
                 .collect();
-            results_count = results.len() as i32;
-            Json(QueryResponse { results }).into_response()
+            let count = results.len() as i32;
+            (Json(QueryResponse { results }).into_response(), count)
         }
         Err(e) => {
             error!("Search error: {}", e);
-            results_count = 0;
             (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": e.to_string()})),
+                )
+                    .into_response(),
+                0,
             )
-                .into_response()
         }
     };
 
@@ -70,7 +72,6 @@ pub async fn ollama_generate_proxy_handler(
     headers: axum::http::HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> impl IntoResponse {
-    use futures::StreamExt;
     let client = reqwest::Client::new();
     let url = format!("{}/api/generate", state.ollama_url.trim_end_matches('/'));
 

@@ -837,9 +837,11 @@ mnemosyne/
 
 | Module | Fichier | Tests | Description |
 |--------|---------|-------|-------------|
-| `indexing` | `indexing.rs` | 3 | `split_text` : simple, paragraphes, boundaries |
-| `retrieval` | `retrieval.rs` | 1 | Pipeline complet mocké (embed → search → rerank) |
+| `indexing` | `indexing.rs` | 21 | `split_text` (10), `safe_truncate` (3), `enrich_chunks_with_context` (4), `parse_llm_metadata` (7) |
+| `retrieval` | `retrieval.rs` | 6 | Pipeline, empty results, embedding fail, no embedding, rerank fail, multi-résultats |
 | `auth` | `auth.rs` | 2 | Login success + invalid password |
+| `litellm` | `litellm.rs` | 6 | `build_api_url` : plain, trailing slash, `/v1`, `/v1/`, chat, empty |
+| **Total** | | **38** | |
 
 Framework de mock : **mockall** (génération automatique de mocks async).
 
@@ -964,6 +966,29 @@ Stack : Python 3.11, LangChain, LiteLLM, pgvector, Rich (barres de progression).
 - `pipeline_handlers.rs` : métriques d'usage intégrées dans `/api/indexing/stats`
 - CI locale (`local-ci.sh`) : fmt → clippy → test → build
 
+### v0.1.2 (2025-07-05)
+
+#### 🔧 Refactoring & Qualité
+
+- **Découpage de `process_file_internal`** : extraction de `extract_content()`, `enrich_with_llm()`, `generate_embeddings_batched()` — orchestration réduite de 120 à 40 lignes
+- **Parallélisation des appels LLM** : résumé + métadonnées via `tokio::join!` (÷2 le temps d'enrichissement)
+- **Élimination du clone `chunks_content`** : `enrich_chunks_with_context()` prend désormais `&[String]`
+- **Extraction `build_api_url()`** : URL construction dupliquée (2×) factorisée dans `litellm.rs` — 6 tests unitaires
+- **Extraction `row_to_run()`** : mapping `PipelineRun` dupliqué (3×) factorisé dans `postgres_account.rs`
+- **Extraction `extract_pdf_text()`** : triple `Ok(Ok(Ok()))` isolé dans `file_scanner.rs`
+- **Extraction helpers Qdrant** : `get_str()`, `get_i64()`, `get_str_list()`, `get_optional_str()`, `get_optional_str_list()` — parsing réduit de 60 à 15 lignes
+- **Constantes nommées** : `EMBEDDING_BATCH_SIZE` (32), `FILE_SCAN_CONCURRENCY` (8), `LLM_TRUNCATION_LIMIT` (10000)
+
+#### 🧪 Tests
+
+- **32 nouveaux tests** (6 → 38) :
+  - Splitter : empty, whitespace, small, overlap, unicode, large
+  - Enrichissement : format, empty context, empty chunks, special chars
+  - Metadata LLM : valid JSON, markdown fence, plain fence, partial, empty, invalid, fallback
+  - `safe_truncate` : ascii, unicode boundary, empty
+  - Retrieval : empty results, embedding fail, no embedding, rerank fail, multi-résultats
+  - `build_api_url` : plain, trailing slash, `/v1`, `/v1/`, chat completions, empty
+
 ### v0.1.0 (2025-05-16)
 
 #### 🚀 Nouvelles fonctionnalités
@@ -990,15 +1015,6 @@ Stack : Python 3.11, LangChain, LiteLLM, pgvector, Rich (barres de progression).
 - Logs structurés JSON (tracing)
 - Tests unitaires avec mockall
 - Legacy Python version préservée
-
-#### 🏗️ Architecture
-
-- Hexagonale (ports & adapters)
-- Async Rust (Tokio + Axum)
-- Collection Qdrant : Cosinus, 3 shards, replication 2, on-disk payload, full-text index
-- Concurrence 8 (buffer_unordered)
-- Batch embedding (32 chunks)
-- Text splitter récursif multi-niveaux
 
 ---
 
