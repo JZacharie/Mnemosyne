@@ -21,7 +21,24 @@ impl LocalFileScanner {
 impl FileScanner for LocalFileScanner {
     async fn scan_directory(&self, path: &str) -> Result<Vec<String>> {
         let mut files = Vec::new();
-        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            ![
+                "node_modules",
+                "vendor",
+                "target",
+                ".git",
+                ".cache",
+                "bundle",
+                "tmp",
+                "temp",
+                "dist",
+                ".github",
+            ]
+            .contains(&name.as_str())
+        });
+
+        for entry in walker.filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
                 if let Some(ext) = entry.path().extension() {
                     let ext_str = ext.to_string_lossy().to_lowercase();
