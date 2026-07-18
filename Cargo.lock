@@ -1988,7 +1988,6 @@ dependencies = [
  "bcrypt",
  "chrono",
  "clap",
- "clap_derive",
  "dotenvy",
  "futures",
  "glob",
