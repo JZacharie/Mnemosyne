@@ -13,7 +13,7 @@ tokio = { version = "1.0", features = ["full"] }
 
 # Web Framework
 axum = { version = "0.8", features = ["ws"] }
-tower = "0.4"
+tower = "0.5"
 tower-http = { version = "0.5", features = ["fs", "cors", "compression-gzip", "trace"] }
 
 # Serialization
