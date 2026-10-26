@@ -13,7 +13,7 @@ tokio = { version = "1.0", features = ["full"] }
 
 # Web Framework
 axum = { version = "0.8", features = ["ws"] }
-tower = "0.4"
+tower = "0.5"
 tower-http = { version = "0.7", features = ["fs", "cors", "compression-gzip", "trace"] }
 
 # Serialization
@@ -21,12 +21,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Auth
-jsonwebtoken = "10.3"
+jsonwebtoken = "11.0"
 bcrypt = "0.19"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Logging & Observability
 tracing = "0.1"
@@ -37,20 +37,19 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres",
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 
 # Utils
 glob = "0.3"
 walkdir = "2.0"
-clap = { version = "=4.6.6", features = ["derive", "env"] }
+clap = { version = "=4.6.7", features = ["derive", "env"] }
 async-trait = "0.1"
 futures = "0.3"
 dotenvy = "0.15"
-qdrant-client = "1.17.0"
+qdrant-client = "1.19.0"
 pdf_oxide = "0.3"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 [dev-dependencies]
 mockall = "0.15.0"
-
