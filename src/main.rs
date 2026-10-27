@@ -202,7 +202,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/generate", post(ollama_generate_proxy_handler))
         .route("/api/pipeline/runs", axum::routing::get(list_runs_handler))
         .route(
-            "/api/pipeline/runs/:id",
+            "/api/pipeline/runs/{id}",
             axum::routing::get(get_run_handler),
         )
         .route("/api/pipeline/retry", post(retry_run_handler))
